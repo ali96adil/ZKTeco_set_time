@@ -604,8 +604,7 @@ void startHttpOnce() {
     const bool rtcReady = rtcClock.trustworthy(rtc);
     String out = "{\"ok\":true,\"ssid\":\"" + zkJsonEscape(net.ssid) +
       "\",\"zk_ip\":\"" + zkJsonEscape(net.zkIp) +
-      "\",\"ap_name\":\"" + zkJsonEscape(net.savedApName.length() ?
-      net.savedApName : net.apSsid) +
+      "\",\"ap_name\":\"" + zkJsonEscape(net.currentApName()) +
       "\",\"idle\":" + String(screenIdle.timeout()) +
       ",\"armed\":" + String(localArm.allowed() ? "true" : "false") +
       ",\"arm_seconds\":" + String(localArm.seconds()) +
