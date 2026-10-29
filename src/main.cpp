@@ -1,4 +1,5 @@
-// M5 safe default: read-only firmware. Time-write laboratory path requires explicit build flag.
+// M5 production firmware: independent authenticated HTTPS + physical clock writes.
+// Default PlatformIO production env explicitly enables ZK_ENABLE_M5_TIME_WRITE.
 // Target board: M5StickC Plus (original) + ESP32 Arduino.
 // No staff/biometric/attendance records accessed. Admin login credentials are hashed locally.
 #include <Arduino.h>
@@ -238,6 +239,12 @@ RunResult executeSelected(bool allowLargeShift) {
   commandBusy = true;
   hasClockWriteAttempt = true;
   lastClockWriteAttempt = millis();
+  // Anchor the 2-second cooldown to completion, not the start of a slow
+  // network operation. This guard updates even when returning early.
+  struct AttemptFinished {
+    uint32_t& stamp;
+    ~AttemptFinished() { stamp=millis(); }
+  } attemptFinished{lastClockWriteAttempt};
   uint8_t encoded[4];
   if (!zkwire::encodeTime(target, encoded)) {
     statusLine = "CLOCK ENCODE FAILED";
