@@ -119,7 +119,7 @@ function showTab(id){
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 async function api(path,method='GET',fields=null){
  const res=await fetch(path,{method,cache:'no-store',credentials:'same-origin',
- headers:method==='POST'?{'Content-Type':'application/x-www-form-urlencoded'}:{},
+ headers:method==='POST'?{'Content-Type':'application/x-www-form-urlencoded','X-ZK-Edit':'1'}:{},
  body:method==='POST'?new URLSearchParams(fields):undefined});
  const text=await res.text();let result={};
  try{result=JSON.parse(text);}catch(e){result={error:text.slice(0,150)};}
