@@ -7,16 +7,15 @@
 #include <WebServer.h>
 #include <M5StickCPlus.h>
 #include "config.h"
+#include "zk_wire.h"
 
 namespace {
-constexpr uint16_t CMD_CONNECT = 1000;
-constexpr uint16_t CMD_GET_TIME = 201;
-constexpr uint16_t CMD_EXIT = 1001;
-constexpr uint16_t CMD_ACK_OK = 2000;
-constexpr uint16_t CMD_ACK_UNAUTH = 2005;
-constexpr uint16_t ZK_TCP_MAGIC1 = 20560;
-constexpr uint16_t ZK_TCP_MAGIC2 = 32130;
-constexpr size_t MAX_PACKET_BODY = 64;
+constexpr uint16_t CMD_CONNECT = zkwire::kConnect;
+constexpr uint16_t CMD_GET_TIME = zkwire::kGetTime;
+constexpr uint16_t CMD_EXIT = zkwire::kExit;
+constexpr uint16_t CMD_ACK_OK = zkwire::kAckOk;
+constexpr uint16_t CMD_ACK_UNAUTH = zkwire::kAckUnauth;
+constexpr size_t MAX_PACKET_BODY = zkwire::kMaxBody;
 constexpr uint32_t TIMEOUT_MS = 5000;
 WebServer server(80);
 uint32_t lastWifiAttempt = 0;
@@ -24,40 +23,6 @@ uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
 bool serverStarted = false;
-
-uint16_t le16(const uint8_t *p) {
-  return static_cast<uint16_t>(p[0]) |
-         (static_cast<uint16_t>(p[1]) << 8);
-}
-uint32_t le32(const uint8_t *p) {
-  return static_cast<uint32_t>(p[0]) |
-         (static_cast<uint32_t>(p[1]) << 8) |
-         (static_cast<uint32_t>(p[2]) << 16) |
-         (static_cast<uint32_t>(p[3]) << 24);
-}
-void put16(uint8_t *p, uint16_t v) {
-  p[0] = static_cast<uint8_t>(v & 255);
-  p[1] = static_cast<uint8_t>((v >> 8) & 255);
-}
-void put32(uint8_t *p, uint32_t v) {
-  for (int i = 0; i < 4; ++i) p[i] = (v >> (8 * i)) & 255;
-}
-
-// Mirrors pyzk checksum algorithm (not the standard TCP checksum).
-uint16_t zkChecksum(const uint8_t *p, size_t len) {
-  uint32_t sum = 0;
-  size_t i = 0;
-  while (i + 1 < len) {
-    sum += le16(p + i);
-    if (sum > 65535) sum -= 65535;
-    i += 2;
-  }
-  if (i < len) sum += p[i];
-  while (sum > 65535) sum -= 65535;
-  int32_t result = ~static_cast<int32_t>(sum);
-  while (result < 0) result += 65535;
-  return static_cast<uint16_t>(result);
-}
 
 bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   const uint32_t start = millis();
@@ -76,33 +41,13 @@ bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   return done == count;
 }
 
-struct Reply {
-  uint16_t code = 0;
-  uint16_t session = 0;
-  uint16_t replyId = 0;
-  uint8_t data[MAX_PACKET_BODY - 8] = {};
-  size_t dataLen = 0;
-};
+using Reply = zkwire::Reply;
 
 bool sendCommand(WiFiClient &client, uint16_t command, uint16_t session,
                  uint16_t previousReplyId) {
-  // M1 hard allowlist: no writes or administrative commands.
-  if (command != CMD_CONNECT && command != CMD_GET_TIME && command != CMD_EXIT) return false;
-  uint8_t zk[8] = {};
-  put16(zk, command);
-  put16(zk + 4, session);
-  put16(zk + 6, previousReplyId);
-  const uint16_t checksum = zkChecksum(zk, sizeof(zk));
-  put16(zk + 2, checksum);
-  uint32_t nextId = static_cast<uint32_t>(previousReplyId) + 1;
-  if (nextId >= 65535) nextId -= 65535;
-  put16(zk + 6, static_cast<uint16_t>(nextId));
-
   uint8_t frame[16] = {};
-  put16(frame, ZK_TCP_MAGIC1);
-  put16(frame + 2, ZK_TCP_MAGIC2);
-  put32(frame + 4, sizeof(zk));
-  memcpy(frame + 8, zk, sizeof(zk));
+  if (!zkwire::makeReadOnlyFrame(command, session, previousReplyId, frame))
+    return false;
   return client.write(frame, sizeof(frame)) == sizeof(frame);
 }
 
@@ -112,48 +57,30 @@ bool receiveReply(WiFiClient &client, Reply &reply, String &error) {
     error = "TCP header timeout";
     return false;
   }
-  if (le16(tcpHeader) != ZK_TCP_MAGIC1 || le16(tcpHeader + 2) != ZK_TCP_MAGIC2) {
-    error = "Unexpected TCP framing";
+  uint32_t length = 0;
+  if (!zkwire::getTcpBodyLength(tcpHeader, length)) {
+    error = "Invalid TCP frame";
     return false;
   }
-  const uint32_t length = le32(tcpHeader + 4);
-  if (length < 8 || length > MAX_PACKET_BODY) {
-    error = "Invalid TCP payload length";
-    return false;
-  }
-
   uint8_t payload[MAX_PACKET_BODY] = {};
   if (!readExact(client, payload, length)) {
     error = "Incomplete ZK reply";
     return false;
   }
-  reply.code = le16(payload);
-  reply.session = le16(payload + 4);
-  reply.replyId = le16(payload + 6);
-  reply.dataLen = length - 8;
-  if (reply.dataLen) memcpy(reply.data, payload + 8, reply.dataLen);
+  if (!zkwire::parseReplyBody(payload, length, reply)) {
+    error = "Malformed ZK reply";
+    return false;
+  }
   return true;
 }
 
 bool decodeZkTime(const uint8_t data[4], String &clock) {
-  uint32_t encoded = le32(data);
-  const int sec = encoded % 60; encoded /= 60;
-  const int minute = encoded % 60; encoded /= 60;
-  const int hour = encoded % 24; encoded /= 24;
-  const int day = encoded % 31 + 1; encoded /= 31;
-  const int month = encoded % 12 + 1; encoded /= 12;
-  const int year = static_cast<int>(encoded) + 2000;
-
-  if (year < 2000 || year > 2099 || month < 1 || month > 12 ||
-      hour > 23 || minute > 59 || sec > 59) return false;
-  const int mdays[] = {31,28,31,30,31,30,31,31,30,31,30,31};
-  const bool leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
-  const int maxDay = (month == 2 && leap) ? 29 : mdays[month - 1];
-  if (day < 1 || day > maxDay) return false;
-
+  zkwire::CivilTime time;
+  if (!zkwire::decodeTime(data, time)) return false;
   char buf[24] = {};
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
-           year, month, day, hour, minute, sec);
+  snprintf(buf, sizeof(buf), "%04u-%02u-%02uT%02u:%02u:%02u",
+           unsigned(time.year), unsigned(time.month), unsigned(time.day),
+           unsigned(time.hour), unsigned(time.minute), unsigned(time.second));
   clock = buf;
   return true;
 }
