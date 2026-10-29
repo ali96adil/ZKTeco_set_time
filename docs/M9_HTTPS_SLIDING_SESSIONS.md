@@ -35,6 +35,8 @@ bash tools/create_m5_tls.sh
     -t upload --upload-port /dev/cu.usbserial-5D5A093FF0
 ```
 
+M9 uses the 4 MiB M5StickC Plus `huge_app.csv` partition layout (3 MiB single application, **no OTA slot**) because TLS exceeds the old 1.25 MiB slot. Changing the partition table may affect saved data; **before flashing, record/back up saved presets, Wi-Fi SSID, setup password, and RTC calibration**. Do not erase flash; NVS is expected at the standard address but must be checked on the physical M5.
+
 The script refuses to regenerate/overwrite existing certificate materials without deliberate backup/revocation. Keep `.secrets/m5-ca.key` and `include/m5_tls_local.h` on your Mac only. Do not upload or share them.
 
 ### Trust on iPhone (once)
