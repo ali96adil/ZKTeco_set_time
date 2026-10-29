@@ -1,6 +1,6 @@
 // M5 safe default: read-only firmware. Time-write laboratory path requires explicit build flag.
 // Target board: M5StickC Plus (original) + ESP32 Arduino.
-// No users, attendance records, biometric data or admin credentials accessed.
+// No staff/biometric/attendance records accessed. Admin login credentials are hashed locally.
 #include <Arduino.h>
 #include <cstring>
 #include <WiFi.h>
