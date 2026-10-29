@@ -57,6 +57,9 @@ bool mdnsRunning = false;
 bool showSetupQr = true;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
+uint32_t lastClockWriteAttempt = 0;
+bool hasClockWriteAttempt = false;
+constexpr uint32_t kClockWriteCooldownMs = 10000;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
 bool serverStarted = false;
@@ -219,15 +222,28 @@ RunResult executeSelected(bool allowLargeShift) {
     statusLine = "BAD DEVICE TIME";
     return RunResult::FAILED;
   }
+  // The live RTC timestamp must be sampled AFTER reading the terminal,
+  // otherwise the network read latency makes the requested time stale.
+  if (selectedPreset == stored.count && !rtcClock.trustworthy(target)) {
+    statusLine = "RTC CALIBRATION EXPIRED";
+    return RunResult::FAILED;
+  }
   int64_t delta = zkwire::civilSeconds(target) - zkwire::civilSeconds(before);
   if ((delta > 86400LL || delta < -86400LL) && !allowLargeShift) {
     statusLine = "LARGE SHIFT: HOLD B 4s";
     return RunResult::NEED_LONG_HOLD;
   }
 #if ZK_ENABLE_M5_TIME_WRITE
-  // ONLY the physical B-button path can reach this function. There is no
-  // HTTP write API. One send, fresh independent SDK read to verify, no retries.
+  // Only locally deliberate B-hold or authenticated HTTPS /api/m9/run may
+  // enter. Never write automatically, never retry an uncertain write.
+  if (hasClockWriteAttempt &&
+      millis() - lastClockWriteAttempt < kClockWriteCooldownMs) {
+    statusLine = "WRITE COOLDOWN 10S";
+    return RunResult::FAILED;
+  }
   commandBusy = true;
+  hasClockWriteAttempt = true;
+  lastClockWriteAttempt = millis();
   uint8_t encoded[4];
   if (!zkwire::encodeTime(target, encoded)) {
     statusLine = "CLOCK ENCODE FAILED";
