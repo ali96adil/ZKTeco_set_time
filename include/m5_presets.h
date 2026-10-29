@@ -81,8 +81,11 @@ class M5Presets {
 
   void routes(WebServer& server, NetworkSetup& net) {
     server.on("/presets", HTTP_GET, [this, &server, &net]() {
-      // All network clients can read shortcut labels/timestamps; only the
-      // physically protected WPA2 setup network can modify their catalog.
+      // Legacy HTML catalog is SETUP-only; station users read authenticated
+      // JSON from /api/m9. Never leak shortcuts on the campus network.
+      if(!net.setupClient(server)) {
+        server.send(403,"text/plain","SETUP AP only");return;
+      }
       load();
       const bool editable = net.setupClient(server);
       String page = zkPageBegin("الأوامر المحفوظة");
