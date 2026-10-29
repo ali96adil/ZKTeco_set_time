@@ -18,6 +18,8 @@ jobs:
           node-version: '22'
       - name: Dry-run UI and read-only regression tests
         run: node tests/clock_ui.test.cjs
+      - name: Mac simulator mock and live-readonly integration tests
+        run: python3 -m unittest discover -s tests -p 'test_mac_simulator.py' -v
       - name: Host ZK wire conformance and forbidden-command tests
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Iinclude tests/zk_wire_host.cpp -o /tmp/zk_wire_host
