@@ -809,6 +809,45 @@ void startHttpOnce() {
   server.onNotFound([]() {
     server.send(404, "text/plain", "Not found. Read-only endpoints only.");
   });
+  // Initial credential enrollment and credential recovery are local-only,
+  // available from the physically selected WPA2 setup AP. They are never
+  // exposed over campus Wi-Fi nor served by the HTTPS login endpoint.
+  server.on("/auth/setup",HTTP_GET,[](){
+    if (!net.setupClient(server)) {
+      server.send(403,"text/plain","Requires protected M5 setup WiFi");return;
+    }
+    String page=zkPageBegin("تعيين حساب ZK Clock");
+    page+="<p>حساب الجهاز ثابت ويشتغل على HTTPS. تقدر تختار "
+      "المستخدم والباسورد مرة واحدة، وSafari راح يتذكر الجلسة.</p>"
+      "<p>إعدادات الدخول تتغير هنا فقط، على شبكة M5 المحمية.</p>"
+      "<form method='post' action='/auth/setup'>"
+      "<label>المستخدم</label><input name='user' value='operator'"
+      " minlength='3' maxlength='24' autocomplete='username' required>"
+      "<label>كلمة مرور ثابتة (12 حرف على الأقل)</label>"
+      "<input type='password' name='pass' minlength='12' maxlength='96'"
+      " autocomplete='new-password' required>"
+      "<button type='submit'>حفظ الحساب وإلغاء الجلسات السابقة</button></form>"
+      "<p>قبل دخول HTTPS، ثبت شهادة الثقة المحلية المنشأة على الماك "
+      "للـM5. لا تتجاوز تحذير الشهادة.</p>";
+    page+=zkPageEnd();
+    server.sendHeader("Cache-Control","no-store");
+    server.send(200,"text/html; charset=utf-8",page);
+  });
+  server.on("/auth/setup",HTTP_POST,[](){
+    if(!net.setupClient(server)){
+      server.send(403,"text/plain","Requires protected setup WiFi");return;
+    }
+    if(!sessions.configure(server.arg("user"),server.arg("pass"))){
+      server.send(400,"text/plain","Invalid user/password or could not save");
+      return;
+    }
+    String page=zkPageBegin("الحساب محفوظ");
+    page+="<p>انحفظ الحساب على M5 وانلغت كل جلسات الأجهزة القديمة. "
+      "اختار CONNECT على الجهاز، ثم افتح https://zkclock.local/ "
+      "من الآيفون بعد تثبيت شهادة الثقة.</p>";
+    page+=zkPageEnd();
+    server.send(200,"text/html; charset=utf-8",page);
+  });
   const char* m8Headers[]={"X-ZK-Edit"};
   server.collectHeaders(m8Headers,1);
   server.begin();
