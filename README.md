@@ -4,6 +4,16 @@
 
 > The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
 
+## M4 — Full clock commands and manual startup selection
+
+**Current working draft:** [feature/m4-boot-ui-presets](https://github.com/ali96adil/ZKTeco_set_time/tree/feature/m4-boot-ui-presets) · [M4 guide](docs/M4_BOOT_AND_FULL_DATETIME.md).
+
+- **Only two saved shortcut types:** full date+time (e.g. `2026-11-01T08:00:00`) or synchronize with the current phone time. **No time-only/date-only shortcuts.**
+- **M5 startup now waits for your decision immediately:** Button **A = SETUP AP**, Button **B = CONNECT**. Choosing CONNECT retries the existing network indefinitely; **never auto switches to setup after 30 seconds**.
+- **M5 local shortcuts:** save/import up to eight full datetime commands in its WPA2-protected `/presets` page. In CONNECT mode, tap A to cycle; hold B (~2.2s) to execute the highlighted command in a future qualified write-enabled build. Large shifts require holding B ~4.2s. The default firmware is still READ ONLY for safe physical Wi-Fi qualification.
+- **Move shortcuts from Mac to M5:** use the Mac HTTPS dashboard's `نسخ أوامر التاريخ والوقت للـM5` button, then paste its content into the M5's setup AP `http://192.168.4.1/presets` import form. Phone sync stays a **phone-only** shortcut because the M5 cannot infer the phone clock while offline.
+- Lab write-enabled code exists behind an explicit compile flag and is **compiled but not flashed** by CI. No M5 physical button or write path has yet been used on the real terminal.
+
 ## M3 progress: two network modes and saved mobile shortcuts
 
 New development branch **feature/m3-network-presets**:
