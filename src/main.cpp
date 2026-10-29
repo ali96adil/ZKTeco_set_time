@@ -5,6 +5,7 @@
 #include <cstring>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 #include <M5StickCPlus.h>
 #include "config.h"
 #include "zk_wire.h"
@@ -32,6 +33,7 @@ bool buttonBLatched = false;
 bool longShiftHold = false;
 bool buttonALatched = false;
 bool commandBusy = false;
+bool mdnsRunning = false;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
@@ -458,7 +460,7 @@ void drawScreen() {
   M5.Lcd.println("NETWORK: " +
                  String(WiFi.status()==WL_CONNECTED ? "READY" : "CONNECTING"));
   if (WiFi.status()==WL_CONNECTED)
-    M5.Lcd.println(WiFi.localIP().toString());
+    M5.Lcd.println("zkclock.local");
   stored.load();
   M5.Lcd.println("Saved commands: "+String(stored.count));
   if (stored.count) {
@@ -524,6 +526,11 @@ void connectWifiIfNeeded() {
   if (screenMode == ScreenMode::CONNECT) net.tick();
   const bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !reported) {
+    if (!mdnsRunning && MDNS.begin("zkclock")) {
+      MDNS.addService("http", "tcp", 80);
+      mdnsRunning = true;
+      Serial.println("Bonjour local address: http://zkclock.local/");
+    }
     reported = true;
     statusLine = "WIFI CONNECTED";
     Serial.println("M5 IP: " + WiFi.localIP().toString());
@@ -531,6 +538,7 @@ void connectWifiIfNeeded() {
     Serial.println("STA MAC: " + WiFi.macAddress());
     drawScreen();
   } else if (!connected && reported) {
+    if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
     reported = false;
     statusLine = "WIFI DISCONNECTED";
     drawScreen();
