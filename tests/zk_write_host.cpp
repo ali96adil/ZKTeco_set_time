@@ -27,6 +27,19 @@ int main() {
   assert(zkwire::le16(frame+14)==2);
   assert(std::memcmp(frame+16,time,4)==0);
 
+  // Independent byte-for-byte fixture generated using fananimi/pyzk:
+  // create_header(CMD_SET_TIME=202, <I encoded time>, session=123,
+  // reply_id=1). The checksum is intentionally computed BEFORE incrementing
+  // reply_id; this is pyzk's actual wire behavior, not a checksum bug.
+  const uint8_t reference[20] = {
+    0x50,0x50,0x82,0x7d,0x0c,0,0,0,
+    0xca,0x00,0xb2,0x6e,0x7b,0x00,0x02,0x00,
+    0xa2,0x5c,0x64,0x33
+  };
+  assert(std::memcmp(frame,reference,sizeof(reference))==0);
+  assert(zkwire::checksum(frame+8,2+2+2+2+4)!=zkwire::le16(frame+10));
+
+
   zkwire::CivilTime bad=date;
   bad.year=2026;bad.month=2;bad.day=29;
   assert(!zkwire::encodeTime(bad,time));
