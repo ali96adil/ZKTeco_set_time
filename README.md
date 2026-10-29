@@ -45,6 +45,8 @@ python3 -m venv .pio-venv
 python -m pip install platformio
 
 node tests/clock_ui.test.cjs
+# Optional standalone protocol smoke test on Mac (requires clang++):
+clang++ -std=c++11 -Wall -Wextra -Werror -pedantic -Iinclude tests/zk_wire_host.cpp -o /tmp/zk_wire_host && /tmp/zk_wire_host
 pio run -e m5stickc-plus-readonly
 \`\`\`
 
@@ -80,6 +82,7 @@ The sample config uses a non-routable documentation IP \`192.0.2.10\`. Replace i
 
 - [x] Source added to GitHub.
 - [x] Mobile JS syntax verified and seven UI behavior tests passed in an isolated JavaScript runtime.
+- [x] Shared read-only TCP frame/clock decoder extracted to `include/zk_wire.h` with offline C++ fixtures from pyzk, malformed-frame tests and forbidden-command checks.
 - [x] GitHub Actions compile-and-test confirmed: [run 40851267969](https://github.com/ali96adil/ZKTeco_set_time/actions/runs/40851267969) (both firmware and static-ui jobs passed).
 - [x] PlatformIO firmware build passed in CI. Mac local compilation is optional for source review/upload.
 - [ ] Physical M5StickC Plus upload succeeds.
