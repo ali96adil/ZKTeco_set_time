@@ -4,6 +4,17 @@
 
 > The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
 
+## M3 progress: two network modes and saved mobile shortcuts
+
+New development branch **feature/m3-network-presets**:
+
+- M5StickC Plus: connects to existing 2.4 GHz Wi-Fi (open networks supported) or broadcasts a **WPA2-protected setup AP** after a 30-second Wi-Fi failure / holding button B. Configure from `http://192.168.4.1/setup` while joined to its private network. SSID, Wi-Fi password and terminal IP are saved to ESP32 NVS. **M5 terminal control remains READ ONLY** until hardware qualification.
+- Mac HTTPS gateway: pair Safari once using the short Mac-displayed code (`--enable-pairing --paired-only`). Browser remembers session for 30 days; later use `--paired-only` to avoid recurring passwords. Pairing uses TLS and secure browser cookies.
+- Save up to 12 shortcuts: **sync phone**, **specific time**, **specific date**, or **date+time**. On the proven Mac gateway, each quick button sends one live time update and one fresh verification when launched with `--enable-write --paired-only`. No repeated dialogs for small shifts; shifts over 24 hours require the previous manual-confirmation path.
+- Firmware/AP features are not yet physically tested. The earlier Mac-to-ZKTeco write workflow was field-verified, but M3 pairing and presets have only offline tests.
+
+See **[M3 configuration and usage guide](docs/M3_NETWORK_PAIRING_SHORTCUTS.md)** and [M3 draft pull request](https://github.com/ali96adil/ZKTeco_set_time/pull/3).
+
 ## Scope and behavior
 
 The M5StickC Plus (original **Plus**, not Plus2) runs a local Wi-Fi web page:
