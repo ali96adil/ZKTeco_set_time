@@ -4,7 +4,8 @@
 // Its webpage can only be accessed through the M5 AP, not campus Wi-Fi.
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPWebServer.hpp>
+using WebServer = ESPWebServer;
 #include <Preferences.h>
 #include <esp_system.h>
 #include "web_navigation.h"
@@ -51,7 +52,10 @@ public:
   }
 
   bool setupClient(WebServer& server) const {
-    return apOn && server.client().localIP() == WiFi.softAPIP();
+    // Port 80 is started only while physically selected SETUP AP is active.
+    // HTTPS station is a separate TLS-only listener on port 443.
+    (void)server;
+    return apOn;
   }
 
   static String safeHtml(String str) {
