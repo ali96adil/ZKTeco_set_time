@@ -10,6 +10,8 @@ def shortcut_panel(csrf: str, enable_write: bool) -> str:
 <p class="small">كل اختصار يحدد التاريخ والوقت معاً، أو يزامن الوقت الحالي للهاتف. ضغطة واحدة تنفذ الأمر على الجهاز الحقيقي.
 بعد التنفيذ تُقرأ الساعة مرة واحدة للتحقق. التغييرات الأكبر من يوم تحتاج التأكيد اليدوي.</p>
 <div id="shortcutList"></div>
+<button type="button" id="copyM5" class="primary" style="background:#526578;margin:10px 0">نسخ أوامر التاريخ والوقت للـM5</button>
+<p class="small">الصق الناتج من هذا الزر بصفحة 192.168.4.1/presets في وضع إعداد M5. مزامنة الهاتف تعمل من الموبايل فقط.</p>
 <hr>
 <h3 style="font-size:16px">إضافة اختصار</h3>
 <label for="quickName">اسم الزر</label>
@@ -94,6 +96,20 @@ function updateField(){
  e('quickValue').step=1;
  e('quickValue').value='';
 }
+e('copyM5').onclick=async()=>{
+ try{
+   const records=items.filter(p=>p.kind==='datetime');
+   if(!records.length)throw Error('ماكو أوامر تاريخ ووقت كاملة حتى تنسخها');
+   if(records.length>8)throw Error('M5 يقبل 8 أوامر فقط؛ قلل العدد أولاً');
+   for(const p of records){
+     if(new TextEncoder().encode(p.name).length>24 || /[|\r\n]/.test(p.name))
+       throw Error('اختصر اسم '+p.name+' إلى 24 بايت وبدون |');
+   }
+   const text=records.map(p=>p.name+'|'+p.value).join('\n');
+   await navigator.clipboard.writeText(text);
+   status('اننسخت '+records.length+' أوامر. افتح شبكة إعداد M5 والصقها في استيراد الأوامر.');
+ }catch(err){status('تعذر نسخ الأوامر: '+err.message);}
+};
 e('quickKind').onchange=updateField;
 e('shortcutSave').onclick=async()=>{
  try{
