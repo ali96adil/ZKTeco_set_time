@@ -40,6 +40,10 @@ jobs:
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Iinclude tests/zk_wire_host.cpp -o /tmp/zk_wire_host
           /tmp/zk_wire_host
+      - name: M5 physical-button encoder and date checks (offline)
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Iinclude tests/zk_write_host.cpp -o /tmp/zk_write_host
+          /tmp/zk_write_host
 
   firmware:
     runs-on: ubuntu-latest
