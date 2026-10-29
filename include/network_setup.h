@@ -71,8 +71,10 @@ public:
           "<form method='post' action='/setup'>"
           "<label>اسم Wi-Fi اللي يتصل بيها M5</label><input name='ssid' maxlength='32' required value='"
           + safeHtml(ssid) + "'>"
-          "<label>كلمة مرور Wi-Fi (فارغة للشبكة المفتوحة)</label>"
-          "<input name='pass' type='password' maxlength='63' autocomplete='off'>"
+          "<label>كلمة مرور Wi-Fi (اتركها فارغة للاحتفاظ بالقديمة إذا نفس الشبكة)</label>"
+          "<input name='pass' type='password' maxlength='63' autocomplete='new-password'>"
+          "<label><input type='checkbox' name='open' value='1' style='width:auto'>"
+          " شبكة مفتوحة بدون كلمة مرور</label>"
           "<label>عنوان IP جهاز البصمة</label><input name='zkip' maxlength='15' value='"
           + safeHtml(zkIp) + "' required>"
           "<label>اسم شبكة إعداد M5 (حروف إنكليزية أو أرقام أو - أو _)</label>"
@@ -103,6 +105,15 @@ public:
       }
       String newSsid = server.arg("ssid");
       String newPass = server.arg("pass");
+      bool useOpenNetwork = server.hasArg("open");
+      if (!newPass.length() && !useOpenNetwork && newSsid == ssid)
+        newPass = password;
+      if ((!newPass.length() && !useOpenNetwork && newSsid != ssid) ||
+          (useOpenNetwork && newPass.length())) {
+        server.send(400, "text/plain",
+                    "Provide password or mark new network as open");
+        return;
+      }
       String newIp = server.arg("zkip");
       String newName = server.arg("apname");
       String timeoutText = server.arg("idle");
