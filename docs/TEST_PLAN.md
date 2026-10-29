@@ -45,7 +45,7 @@
 ## Gate D — web interface dry-run
 
 - [ ] Default state read-only; Sync and Manual forms show preview but cannot write.
-- [ ] Manual date/time rejects impossible dates and formatting.
+- [ ] Manual date/time rejects impossible dates and formatting but intentionally accepts earlier and later valid dates.
 - [ ] Phone time is gathered at button click (not page load).
 - [ ] Display Asia/Baghdad local time even when phone is set to another timezone.
 - [ ] Show stale source clock, unreliable phone time and high latency warnings.
@@ -59,7 +59,10 @@
 - [ ] Record count/time of device before change, without exporting PII to this project.
 - [ ] Perform test **outside punch-in/out window**, with no active transactions.
 - [ ] Double-check phone or manually entered time against separate trusted source.
-- [ ] Operator reads old/new times and signs off on proposed jump.
+- [ ] Operator reads old/new times and signs off on proposed jump (signed offset in seconds/minutes, forward or backward).
+- [ ] Backward time correction is available in both manual and phone-sync modes, including shifts greater than 2 minutes, after a visible attendance timestamp-collision warning and explicit extra acknowledgement; the direction alone never blocks the action.
+- [ ] Audit signed correction amount and source (phone/manual) without recording attendance/biometric data.
+- [ ] Test rollback correction with a simulator first; never test large live backward shifts during staff check-in.
 - [ ] One deliberate `CMD_SET_TIME`; NO automatic retry.
 - [ ] Disconnect, wait, reconnect, read twice, compare with advancing reference clock.
 - [ ] Show **VERIFIED** only if both reads are within 2 seconds; otherwise **UNVERIFIED**.
