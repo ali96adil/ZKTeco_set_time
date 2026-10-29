@@ -111,7 +111,7 @@ document.getElementById('mockApply').onclick = async () => {
   const output = document.getElementById('mockStatus');
   const manualValue = document.getElementById('manual').value;
   const localTime = mode === 'manual'
-    ? manualValue
+    ? (manualValue.length === 16 ? manualValue + ':00' : manualValue)
     : baghdadParts(Date.now()).replace(' ', 'T');
   if (!localTime || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$/.test(localTime)) {
     output.textContent = 'اختر تاريخاً ووقتاً صحيحين أولاً';
