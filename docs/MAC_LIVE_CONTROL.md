@@ -1,0 +1,105 @@
+# Mac HTTPS live clock control — optional M5 substitute
+
+This separate Mac gateway runs the existing mobile dashboard and uses the same previously verified `pyzk` SDK for the ZKTeco iFace 950 on `10.1.65.2:4370`. **The earlier `mock` mode always changes a virtual clock only.** This is different: when deliberately enabled, this gateway can change the **actual** terminal's date/time.
+
+**Current status: Mac-to-terminal live write path was field-tested successfully on 2026-10-29 for both manual and phone time adjustments; full production security qualification and M5 hardware qualification are still pending.** It is NOT ESP32 firmware. See [sanitized qualification evidence](FIELD_QUALIFICATION_2026-10-29.md).
+
+## Three modes
+
+| Command | Read actual device? | Set actual device? |
+| --- | --- | --- |
+| `tools/mac_simulator.py --mode mock` | No | Never (virtual only) |
+| `tools/mac_simulator.py --mode live-readonly` | Yes | Never |
+| `tools/mac_live_control.py` (without `--enable-write`) | Yes | No |
+| `tools/mac_live_control.py --enable-write` | Yes | **Yes, after authenticated confirmation** |
+
+This gateway is independent of the M5Stick firmware and does **not** add a firmware write opcode.
+
+## Network and HTTPS requirements
+
+The campus Wi-Fi is **open**, with a MikroTik captive portal. An ordinary HTTP control endpoint on this network is unsafe. This server therefore requires a TLS certificate and key for **all** modes, uses a randomly generated temporary administrator password, enforces Basic authentication, same-origin and CSRF protections, and requires a one-shot confirmation.
+
+A self-signed certificate is **not trustworthy merely because Safari allows bypassing a warning**. Do not enter the operator password after clicking through an unverified certificate warning on the open Wi-Fi network. First establish a trusted certificate (or explicitly install/verify a private trust anchor on the phone), or operate exclusively on an isolated, protected administrative LAN. The Mac must still be able to route to ZKTeco over the permitted private LAN.
+
+No port forwarding; do not expose this management server to the internet. Restrict Mac firewall access to authorized clients.
+
+## macOS setup
+
+From your checked-out project branch:
+
+```bash
+cd ~/zkteco-m5-lab/ZKTeco_set_time
+git fetch origin
+git switch feature/mac-live-control
+git pull --ff-only origin feature/mac-live-control
+
+MAC_IP=$(ipconfig getifaddr en0)
+echo "Mac IP: $MAC_IP"
+bash tools/create_local_tls.sh "$MAC_IP"
+```
+
+**Important:** This creates a separate 7-day private CA and a server certificate whose IP matches the Mac. The script deletes the CA signing private key once the server certificate is issued, but the server key remains sensitive. iOS will **not** trust this CA until you explicitly install and trust it.
+
+To use Safari on the iPhone **safely** on an open Wi-Fi network:
+
+1. AirDrop **only** `.secrets/ZKTeco_Local_CA.cer` to the iPhone. Never AirDrop `.key` files. Do not distribute the CA over the open Hotspot using ordinary HTTP.
+2. On the iPhone, open **Settings → General → VPN & Device Management** and install the downloaded certificate profile if prompted. Then open **Settings → General → About → Certificate Trust Settings** and enable full trust **only for the named temporary ZKTeco Local Admin CA**.
+3. Before trusting, verify the CA SHA-256 fingerprint printed on the Mac with the certificate details on the phone when available, or confirm transfer provenance directly using AirDrop. Do **not** trust any unsolicited similarly named certificate.
+4. Visit `https://<MAC_IP>:8766/`. Safari must show an ordinary **trusted** HTTPS connection with no certificate warning. **Do not bypass a certificate warning to enter the temporary password.** If a warning persists, stop and check the IP / certificate / profile.
+5. After the approved maintenance session, stop the server and **remove the temporary CA profile / trust** from the iPhone. The private key `.secrets/mac.key` and certificates remain in the ignored local folder until you intentionally delete them.
+
+Installing a root certificate grants broad trust for certificates issued by that root, so use this only for the short approved session. Prefer an organization-managed certificate on a trusted isolated management Wi-Fi when available. The LAN must allow phone → Mac HTTPS and Mac → ZKTeco TCP/4370 separately.
+
+Test the gateway read-only *on the Mac* (it still needs a valid/trusted HTTPS cert for the browser):
+
+```bash
+~/zkteco-clock/.venv/bin/python tools/mac_live_control.py \
+  --cert .secrets/mac.crt --key .secrets/mac.key
+```
+
+When the Mac and phone are on an isolated, authorized network where the certificate trust is established, explicitly enable live write support:
+
+```bash
+~/zkteco-clock/.venv/bin/python tools/mac_live_control.py \
+  --bind 0.0.0.0 --port 8766 \
+  --cert .secrets/mac.crt --key .secrets/mac.key \
+  --enable-write
+```
+
+Open `https://MAC_IP:8766/` from the phone, using the **actual LAN IP** from the command. The Mac terminal prints temporary credentials: username `operator` and a random password that changes each restart. Use the credentials *only after verifying the HTTPS certificate*.
+
+This server defaults to `127.0.0.1` and **read-only**. The deliberate `--enable-write` flag is required for real clock changes. Server port **8766** is separate from mock simulator port **8765**; close the mock simulator if it is confusing to compare tabs.
+
+## Mobile workflow, actual device
+
+1. Authenticate over trusted HTTPS.
+2. Press **قراءة ساعة الجهاز**; compare with a trusted real-world clock.
+3. Select **مزامنة الهاتف** or **إدخال يدوي**. Both backward and forward changes are supported.
+4. Press **تحضير تصحيح فعلي**. The Mac reads the device again and shows old/new times and signed offset. The request expires within 25 seconds.
+5. If the offset is correct, acknowledge the database backup, no staff clocking in/out and valid time source; press **تنفيذ التصحيح على جهاز البصمة**, then accept the final browser confirmation.
+6. The gateway sends **one** `pyzk.set_time()` request, disconnects, and reads the terminal through **two new connections**. Only two readings within 2 seconds of expected advancing time count as `VERIFIED`.
+7. `UNVERIFIED` or network error means check the physical terminal display **before attempting a second correction**. Never auto-retry an ambiguous write.
+
+A backwards correction may create overlapping timestamps for **new** attendance events but does not inherently erase historical logs. Do the correction during a maintenance window and retain a checked backup.
+
+## Safety boundaries
+
+- No user, face, fingerprint, administrator or attendance-record functions.
+- No device disable, erase, reset, or automatic synchronization loops.
+- One pending transaction, one-time token consumed before sending.
+- HTTPS, short-lived in-memory credentials, CSRF and same-origin restrictions.
+- Audit log contains the adjustment direction/magnitude and verification outcome only.
+- The original unencrypted ZKTeco TCP/4370 network still requires router access controls.
+- The gateway must be stopped with **Ctrl+C** when the session ends.
+
+## Validation
+
+- [x] Independent earlier Mac `pyzk` read/set/reconnect experiment confirmed clock adjustment.
+- [x] Python syntax, mocked one-shot verification and read-only guard tested in GitHub Actions; see linked workflow run in pull request.
+- [ ] Browser authentication, CSRF and trusted HTTPS fully qualified on the operator's Mac + iPhone.
+- [ ] Trusted mobile HTTPS certificate and authorization reviewed.
+- [x] Manual live clock adjustment: +92 seconds, `sent=True verified=True write_error=None` (2026-10-29 operator log).
+- [x] Phone live clock adjustment: −92 seconds, `sent=True verified=True write_error=None` (2026-10-29 operator log).
+- [ ] Physical device screen confirmation and complete deployment/security review.
+
+The operator-provided 2026-10-29 gateway logs prove the new Mac gateway executed live clock adjustments and its verification logic accepted two successive reads per adjustment. These logs do not prove the M5 hardware works or that other attendance-device data was independently inspected.

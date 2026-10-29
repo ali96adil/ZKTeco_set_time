@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+"""Explicitly opt-in HTTPS Mac gateway for reading/setting ZKTeco clock.
+
+This is NOT firmware. It runs on the Mac and uses proven pyzk TCP SDK.
+No connections at startup. --enable-write is REQUIRED for set operations.
+Never exposes a write interface on unencrypted HTTP.
+No employee or biometric APIs; do not export attendance data.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import secrets
+import ssl
+import threading
+import time
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
+
+from mac_simulator import dashboard_html, parse_local_datetime
+
+BAGHDAD = ZoneInfo("Asia/Baghdad")
+MAX_BODY = 512
+PREPARE_LIFETIME = 25.0
+VERIFY_TOLERANCE = 2.0
+
+
+def baghdad_naive_from_epoch_ms(epoch_ms: int) -> datetime:
+    if not isinstance(epoch_ms, int) or isinstance(epoch_ms, bool):
+        raise ValueError("Invalid phone epoch")
+    dt = datetime.fromtimestamp(epoch_ms / 1000, BAGHDAD).replace(tzinfo=None)
+    if not 2000 <= dt.year <= 2099:
+        raise ValueError("Phone clock outside supported years")
+    return dt
+
+
+def read_real_clock(host: str, port: int) -> datetime:
+    from zk import ZK
+    conn = None
+    try:
+        conn = ZK(host, port=port, timeout=8, password=0,
+                  force_udp=False, ommit_ping=True).connect()
+        return conn.get_time()
+    finally:
+        if conn is not None:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+
+
+def set_real_clock_once(host: str, port: int, dt: datetime) -> None:
+    """Exactly one command; never retry even if network response is ambiguous."""
+    from zk import ZK
+    conn = None
+    try:
+        conn = ZK(host, port=port, timeout=8, password=0,
+                  force_udp=False, ommit_ping=True).connect()
+        conn.set_time(dt)
+    finally:
+        if conn is not None:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+
+
+@dataclass(frozen=True)
+class PendingChange:
+    nonce: str
+    old_clock: datetime
+    proposed: datetime
+    source: str
+    prepared_at: float
+    phone_epoch_ms: int | None
+
+
+class Gateway(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, addr: tuple[str, int], *, device_host: str,
+                 device_port: int, password: str, enable_write: bool,
+                 reader=None, setter=None):
+        self.device_host = device_host
+        self.device_port = device_port
+        self.password = password
+        self.csrf_token = secrets.token_urlsafe(32)
+        self.enable_write = enable_write
+        self.reader = reader or (lambda: read_real_clock(device_host, device_port))
+        self.setter = setter or (lambda dt: set_real_clock_once(device_host, device_port, dt))
+        self.lock = threading.RLock()
+        self.pending: PendingChange | None = None
+        self.page = build_live_page(self.csrf_token, enable_write)
+        super().__init__(addr, Handler)
+
+    def read_once(self) -> datetime:
+        # This lock serializes concurrent SDK sessions with local writes.
+        with self.lock:
+            return self.reader()
+
+    def prepare(self, doc: dict) -> dict:
+        with self.lock:
+            if not self.enable_write:
+                raise PermissionError("Write mode is disabled")
+            if doc.get("source") not in ("manual", "phone"):
+                raise ValueError("Invalid time source")
+            source = doc["source"]
+            prepared_at = time.monotonic()
+            phone_epoch_ms = None
+            if source == "manual":
+                if set(doc) != {"source", "local_datetime"}:
+                    raise ValueError("Invalid manual fields")
+                proposed = parse_local_datetime(doc["local_datetime"])
+            else:
+                if set(doc) != {"source", "client_epoch_ms"}:
+                    raise ValueError("Invalid phone fields")
+                phone_epoch_ms = doc["client_epoch_ms"]
+                proposed = baghdad_naive_from_epoch_ms(phone_epoch_ms)
+                # A stale or inaccurate phone clock needs operator review;
+                # no implicit NTP correction occurs.
+            old = self.reader()
+            self.pending = PendingChange(
+                nonce=secrets.token_urlsafe(24),
+                old_clock=old,
+                proposed=proposed,
+                source=source,
+                prepared_at=prepared_at,
+                phone_epoch_ms=phone_epoch_ms,
+            )
+            diff = (proposed - old).total_seconds()
+            return {
+                "ok": True,
+                "nonce": self.pending.nonce,
+                "old_time": old.strftime("%Y-%m-%dT%H:%M:%S"),
+                "proposed_time": proposed.strftime("%Y-%m-%dT%H:%M:%S"),
+                "offset_seconds": int(round(diff)),
+                "backward": diff < 0,
+                "expires_in_seconds": int(PREPARE_LIFETIME),
+            }
+
+    def apply(self, doc: dict) -> dict:
+        with self.lock:
+            if not self.enable_write:
+                raise PermissionError("Write mode is disabled")
+            if set(doc) != {"nonce", "confirmed", "backup_confirmed"}:
+                raise ValueError("Invalid confirmation fields")
+            p = self.pending
+            # Consume the request once whether it succeeds or fails.
+            self.pending = None
+            if p is None or not secrets.compare_digest(str(doc["nonce"]), p.nonce):
+                raise ValueError("No valid pending change")
+            if doc["confirmed"] is not True or doc["backup_confirmed"] is not True:
+                raise ValueError("Explicit confirmation and backup acknowledgement required")
+            age = time.monotonic() - p.prepared_at
+            if age > PREPARE_LIFETIME:
+                raise ValueError("Confirmation expired; read and prepare again")
+            old_now = self.reader()
+            old_expected = p.old_clock + timedelta(seconds=age)
+            if abs((old_now - old_expected).total_seconds()) > 3:
+                raise RuntimeError("Device clock changed since preview; no command sent")
+
+            if p.source == "phone":
+                assert p.phone_epoch_ms is not None
+                corrected_ms = p.phone_epoch_ms + int(age * 1000)
+                target = baghdad_naive_from_epoch_ms(corrected_ms)
+            else:
+                target = p.proposed
+
+            # Deliberately allow backward AND forward adjustment.
+            before_send = time.monotonic()
+            sent = False
+            write_error = None
+            try:
+                sent = True
+                self.setter(target)   # ONE SDK SET_TIME attempt; NO retry.
+            except Exception as exc:
+                write_error = type(exc).__name__
+
+            # Earlier iFace 950 testing showed an immediate same-session read
+            # can be stale. Verify only after a fresh connection/short delay.
+            time.sleep(0.8)
+            checks = []
+            for idx in range(2):
+                if idx:
+                    time.sleep(0.5)
+                try:
+                    current = self.reader()  # fresh SDK connection per read
+                    expected = target + timedelta(seconds=time.monotonic() - before_send)
+                    delta = (current - expected).total_seconds()
+                    checks.append({"time": current.strftime("%Y-%m-%dT%H:%M:%S"),
+                                   "error_seconds": round(delta, 2)})
+                except Exception as exc:
+                    checks.append({"error": type(exc).__name__})
+
+            verified = (write_error is None and len(checks) == 2
+                        and all("error_seconds" in c and
+                                abs(c["error_seconds"]) <= VERIFY_TOLERANCE
+                                for c in checks))
+            # Operational audit is intentionally limited to clock deltas only;
+            # no employee IDs, biometrics or attendance records are read.
+            drift = (target - old_now).total_seconds()
+            print(f"CLOCK_CHANGE source={p.source} delta_seconds={drift:.0f} "
+                  f"sent={sent} verified={verified} write_error={write_error}",
+                  flush=True)
+            return {
+                "ok": True,
+                "status": "VERIFIED" if verified else "UNVERIFIED",
+                "source": p.source,
+                "requested_time": target.strftime("%Y-%m-%dT%H:%M:%S"),
+                "offset_seconds": int(round(drift)),
+                "checks": checks,
+                "write_error": write_error,
+            }
+
+
+def build_live_page(csrf_token: str, enable_write: bool) -> bytes:
+    html = dashboard_html()
+    html = html.replace("نسخة M2 تجريبية: قراءة حقيقية ومعاينة التصحيح فقط. <b>لا تحتوي أي أمر لتغيير الساعة.</b>",
+                        "بوابة الماك عبر HTTPS: قراءة ساعة البصمة والتحكم المصرّح به.")
+    html = html.replace("⚠️ هذه نسخة DRY RUN: لا يوجد زر تطبيق، ولا API لضبط الساعة. تصحيح الوقت للخلف والأمام سيكون متاحاً بعد اختبار الجهاز وحماية عملية التنفيذ. تحقق من ساعة الهاتف؛ قد تكون خاطئة.",
+                        "تأكد من صحة وقت الهاتف أو التاريخ اليدوي، ومن عدم وجود بصمات حضور أثناء التصحيح.")
+    banner = ("التحكم الفعلي مفعّل (بعد الموافقة)" if enable_write
+              else "قراءة حقيقية فقط — تعديل الساعة غير مفعّل")
+    html = html.replace("<header>", '<header><p class="note">'
+                        + banner + '</p>', 1)
+    if enable_write:
+        form = """
+<section class="card">
+<h2>ضبط ساعة جهاز البصمة الحقيقي</h2>
+<p class="small">اقرأ الساعة أولاً، اختر مزامنة الهاتف أو الإدخال اليدوي، ثم اطلب التأكيد.</p>
+<button id="livePrepare" class="primary" type="button">تحضير تصحيح فعلي</button>
+<div id="liveConfirm" hidden>
+<p>الوقت السابق: <b id="oldClock"></b></p>
+<p>الوقت المقترح: <b id="newClock"></b></p>
+<p>الفرق: <b id="shiftClock"></b></p>
+<p class="note" id="liveWarning"></p>
+<label><input id="backupAck" type="checkbox" style="display:inline;width:auto">
+تحققت من الوقت الصحيح، والنسخة الاحتياطية، وعدم وجود بصمات حالياً</label>
+<button id="liveApply" class="primary" type="button">تنفيذ التصحيح على جهاز البصمة</button>
+</div>
+<p id="liveStatus" class="small"></p>
+</section>"""
+        html = html.replace("</main>",form+"</main>",1)
+        script = r"""
+<script>
+(function(){
+const csrf=CSRF_TOKEN_PLACEHOLDER;
+let nonce=null;
+const e=id=>document.getElementById(id);
+async function post(path, body){
+  const res=await fetch(path,{method:'POST',headers:{
+    'Content-Type':'application/json','X-CSRF-Token':csrf
+  },body:JSON.stringify(body),cache:'no-store',credentials:'same-origin'});
+  const answer=await res.json();
+  if(!res.ok)throw Error(answer.error||'Request rejected');
+  return answer;
+}
+e('livePrepare').onclick=async()=>{
+  e('liveConfirm').hidden=true;nonce=null;
+  if(!fresh()){e('liveStatus').textContent='اقرأ ساعة الجهاز أولاً';return;}
+  const source=mode;
+  let body={source};
+  try{
+    if(source==='manual'){
+      const civil=e('manual').value;
+      const epoch=parseBaghdadManual(civil);
+      body.local_datetime=formatCivil(epoch).replace(' ','T');
+    }else{
+      body.client_epoch_ms=Date.now();
+    }
+    const v=await post('/api/prepare',body);
+    nonce=v.nonce;
+    e('oldClock').textContent=v.old_time.replace('T',' ');
+    e('newClock').textContent=v.proposed_time.replace('T',' ');
+    e('shiftClock').textContent=formatDiff(v.offset_seconds*1000);
+    e('liveWarning').textContent=(v.backward
+      ?'تحذير: هذا التغيير يرجع ساعة البصمة للخلف وقد تتداخل أوقات الحضور الجديدة مع السابقة. '
+      :'')+'سيُرسل أمر تعديل واحد فقط ثم تُقرأ الساعة مرتين للتحقق.';
+    e('backupAck').checked=false;
+    e('liveConfirm').hidden=false;
+    e('liveStatus').textContent='التأكيد صالح لمدة '+v.expires_in_seconds+' ثانية.';
+  }catch(ex){e('liveStatus').textContent='فشل التحضير: '+ex.message;}
+};
+e('liveApply').onclick=async()=>{
+  if(!nonce||!e('backupAck').checked){
+    e('liveStatus').textContent='راجع المعلومات وفعّل مربع التأكيد أولاً';return;
+  }
+  if(!window.confirm('تأكيد نهائي: تغيير ساعة البصمة الحقيقية الآن؟'))return;
+  const token=nonce;nonce=null;e('liveConfirm').hidden=true;
+  e('liveStatus').textContent='أُرسل طلب التصحيح؛ جارٍ التحقق بعد إعادة الاتصال...';
+  try{
+    const r=await post('/api/apply',{nonce:token,confirmed:true,backup_confirmed:true});
+    e('liveStatus').textContent=r.status==='VERIFIED'
+       ?'نجحت المزامنة وتأكدت قراءتان جديدتان: '+r.requested_time
+       :'تعذر تأكيد النتيجة (UNVERIFIED). افحص شاشة البصمة قبل المحاولة مرة أخرى.';
+    measuredOffsetMs=null;measuredAtMs=0;
+    e('device').textContent='—';e('delta').textContent='—';
+  }catch(ex){e('liveStatus').textContent='لم يكتمل الطلب: '+ex.message+
+    '. افحص ساعة البصمة قبل تكرار الأمر.';}
+};
+})();
+</script>
+""".replace("CSRF_TOKEN_PLACEHOLDER",json.dumps(csrf_token))
+        html = html.replace("</body>",script+"</body>",1)
+    return html.encode("utf-8")
+
+
+class Handler(BaseHTTPRequestHandler):
+    server: Gateway
+
+    def log_message(self, format: str, *args: object) -> None:
+        print("HTTPS_REQUEST", self.command, urlsplit(self.path).path, flush=True)
+
+    def reply(self, code: int, obj: dict) -> None:
+        payload = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.security_headers()
+        self.send_header("Content-Type","application/json; charset=utf-8")
+        self.send_header("Content-Length",str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def security_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options","nosniff")
+        self.send_header("Referrer-Policy","no-referrer")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                         "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; "
+                         "connect-src 'self'; base-uri 'none'; form-action 'self'")
+
+    def authorized(self) -> bool:
+        authorization = self.headers.get("Authorization","")
+        if not authorization.startswith("Basic "):
+            return False
+        try:
+            raw = base64.b64decode(authorization[6:],validate=True)
+            user, password = raw.decode("utf-8").split(":",1)
+        except Exception:
+            return False
+        return user=="operator" and secrets.compare_digest(password,self.server.password)
+
+    def require_auth(self) -> bool:
+        if self.authorized():return True
+        self.send_response(401)
+        self.security_headers()
+        self.send_header("WWW-Authenticate",'Basic realm="ZKTeco Mac Clock Control"')
+        self.send_header("Content-Length","0")
+        self.end_headers()
+        return False
+
+    def do_GET(self) -> None:
+        if not self.require_auth():return
+        path = urlsplit(self.path).path
+        if path=="/":
+            payload=self.server.page
+            self.send_response(200)
+            self.security_headers()
+            self.send_header("Content-Type","text/html; charset=utf-8")
+            self.send_header("Content-Length",str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if path=="/api/read":
+            try:
+                start=time.monotonic()
+                t=self.server.read_once()
+                self.reply(200,{"ok":True,"device_time":t.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "duration_ms":int((time.monotonic()-start)*1000)})
+            except Exception as exc:
+                self.reply(503,{"ok":False,"error":"Device read failed: "+type(exc).__name__})
+            return
+        self.reply(404,{"ok":False,"error":"Not found"})
+
+    def do_POST(self) -> None:
+        if not self.require_auth():return
+        path = urlsplit(self.path).path
+        if path not in ("/api/prepare","/api/apply") or not self.server.enable_write:
+            self.reply(404,{"ok":False,"error":"Live write unavailable"});return
+        # Browser same-origin and random CSRF header; Basic auth alone is
+        # insufficient to prevent a forged request from another website.
+        host = self.headers.get("Host","")
+        origin = self.headers.get("Origin","")
+        if not host or origin != "https://"+host or \
+           not secrets.compare_digest(self.headers.get("X-CSRF-Token",""),
+                                      self.server.csrf_token):
+            self.reply(403,{"ok":False,"error":"Origin/CSRF check failed"});return
+        if self.headers.get("Content-Type","").split(";")[0].strip() != "application/json":
+            self.reply(415,{"ok":False,"error":"Expected JSON"});return
+        length = self.headers.get("Content-Length","")
+        if not length.isdigit() or not 0 < int(length) <= MAX_BODY:
+            self.reply(413,{"ok":False,"error":"Invalid body size"});return
+        try:
+            obj=json.loads(self.rfile.read(int(length)))
+            if not isinstance(obj,dict):raise ValueError("JSON object required")
+            value=(self.server.prepare(obj) if path=="/api/prepare"
+                   else self.server.apply(obj))
+            self.reply(200,value)
+        except PermissionError:
+            self.reply(403,{"ok":False,"error":"Write disabled"})
+        except (ValueError,OverflowError,OSError):
+            self.reply(400,{"ok":False,"error":"Invalid or expired request"})
+        except Exception as exc:
+            self.reply(503,{"ok":False,"error":"Operation not confirmed: "+
+                            type(exc).__name__})
+
+
+def main() -> None:
+    parser=argparse.ArgumentParser(description="Mac HTTPS clock control gateway")
+    parser.add_argument("--bind",default="127.0.0.1")
+    parser.add_argument("--port",type=int,default=8766)
+    parser.add_argument("--device-host",default="10.1.65.2")
+    parser.add_argument("--device-port",type=int,default=4370)
+    parser.add_argument("--cert",required=True,help="Local TLS certificate PEM")
+    parser.add_argument("--key",required=True,help="Local TLS private key PEM")
+    parser.add_argument("--enable-write",action="store_true",
+                        help="Explicitly permit live SET_TIME after authenticated confirmation")
+    args=parser.parse_args()
+    password=secrets.token_urlsafe(22)
+    gateway=Gateway((args.bind,args.port),device_host=args.device_host,
+                    device_port=args.device_port,password=password,
+                    enable_write=args.enable_write)
+    context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version=ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(certfile=args.cert,keyfile=args.key)
+    gateway.socket=context.wrap_socket(gateway.socket,server_side=True)
+    print("Mac HTTPS ZKTeco gateway",flush=True)
+    print("Mode:", "LIVE CLOCK WRITES ENABLED" if args.enable_write
+          else "READ ONLY",flush=True)
+    print(f"URL: https://{args.bind}:{args.port}/",flush=True)
+    print("Login user: operator")
+    print("Temporary password:",password,flush=True)
+    print("Do not publish or share this password. Stop with Ctrl+C.",flush=True)
+    try:
+        gateway.serve_forever(poll_interval=0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        gateway.server_close()
+
+
+if __name__=="__main__":
+    main()

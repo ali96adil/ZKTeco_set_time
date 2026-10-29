@@ -5,3 +5,8 @@ include/config.h
 *.elf
 *.map
 .DS_Store
+
+# Local HTTPS identity and browser sessions: never publish secrets.
+.secrets/
+*.key
+*.pem
