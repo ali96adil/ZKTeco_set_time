@@ -23,7 +23,7 @@ class SetupDisplayTests(unittest.TestCase):
         self.assertIn("drawSetupPassword()",SRC)
         self.assertIn("showSetupQr = !showSetupQr",SRC)
         self.assertIn('M5.Lcd.drawString("A: PASS"',SRC)
-        self.assertIn('M5.Lcd.drawString("A: QR',SRC)
+        self.assertIn('M5.Lcd.drawString("https://zkclock.local"',SRC)
         self.assertIn("net.apPassword.substring(0,mid)",SRC)
         self.assertIn("net.apPassword.substring(mid)",SRC)
         self.assertNotIn("M5.Lcd.println(net.apPassword);",SRC)
