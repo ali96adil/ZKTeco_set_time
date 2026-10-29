@@ -17,7 +17,6 @@
 #include "screen_idle.h"
 #include "web_navigation.h"
 #include "local_arm.h"
-#include "m8_mobile_ui.h"
 #include "m9_secure_ui.h"
 #include "m9_login_ui.h"
 #include "m5_tls_local.h"
@@ -34,8 +33,7 @@ constexpr uint16_t CMD_ACK_OK = zkwire::kAckOk;
 constexpr uint16_t CMD_ACK_UNAUTH = zkwire::kAckUnauth;
 constexpr size_t MAX_PACKET_BODY = zkwire::kMaxBody;
 constexpr uint32_t TIMEOUT_MS = 5000;
-WebServer server(80); // Private WPA2 setup AP only
-ESPWebServerSecure secureServer(443); // Station HTTPS only
+ESPWebServerSecure secureServer(443); // Same TLS listener for CONNECT and SETUP
 ZkSessions sessions;
 bool secureStarted=false;
 String csrfToken;
@@ -59,11 +57,9 @@ uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
 uint32_t lastClockWriteAttempt = 0;
 bool hasClockWriteAttempt = false;
-constexpr uint32_t kClockWriteCooldownMs = 10000;
+constexpr uint32_t kClockWriteCooldownMs = 2000;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
-bool serverStarted = false;
-bool setupRoutesRegistered = false;
 
 bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   const uint32_t start = millis();
@@ -204,7 +200,7 @@ RunResult executeSelected(bool allowLargeShift) {
   zkwire::CivilTime target;
   if (selectedPreset == stored.count) {
     if (!rtcClock.trustworthy(target)) {
-      statusLine = "RTC NOT CALIBRATED: SETUP";
+      statusLine = "RTC NOT CALIBRATED";
       return RunResult::FAILED;
     }
   } else if (!parseCivil(stored.items[selectedPreset].datetime, target)) {
@@ -238,7 +234,7 @@ RunResult executeSelected(bool allowLargeShift) {
   // enter. Never write automatically, never retry an uncertain write.
   if (hasClockWriteAttempt &&
       millis() - lastClockWriteAttempt < kClockWriteCooldownMs) {
-    statusLine = "WRITE COOLDOWN 10S";
+    statusLine = "WRITE COOLDOWN 2S";
     return RunResult::FAILED;
   }
   commandBusy = true;
@@ -547,8 +543,8 @@ void drawSetupQr() {
   M5.Lcd.setTextSize(1);
   M5.Lcd.drawString("JOIN WIFI",133,9,2);
   M5.Lcd.drawString("SCAN QR",133,32,2);
-  M5.Lcd.drawString("iPhone",133,58,2);
-  M5.Lcd.drawString("Camera",133,76,1);
+  M5.Lcd.drawString("HTTPS",133,58,2);
+  M5.Lcd.drawString("zkclock.local",133,76,1);
   M5.Lcd.drawString("A: PASS",133,101,2);
   M5.Lcd.drawString("B hold: exit",133,121,1);
 }
@@ -574,7 +570,7 @@ void drawSetupPassword() {
   M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(0xBDF7,BLACK);
   M5.Lcd.drawString("type both parts without space",8,109,1);
-  M5.Lcd.drawString("A: QR    192.168.4.1",8,123,1);
+  M5.Lcd.drawString("https://zkclock.local",8,121,1);
 }
 
 void drawScreen() {
@@ -616,261 +612,6 @@ void drawScreen() {
   M5.Lcd.drawString("A: NEXT     HOLD B: RUN",7,105,1);
   M5.Lcd.drawString(statusLine,7,120,1);
 }
-
-void startHttpOnce() {
-  if(serverStarted)return;
-  if(setupRoutesRegistered){server.begin();serverStarted=true;return;}
-  net.attachRoutes(server, screenIdle);
-  stored.routes(server, net);
-  rtcClock.routes(server, net);
-  // The mobile editor never writes to ZKTeco. Live clock changes remain
-  // physically gated, and disabled in the default firmware.
-  server.on("/api/m8", HTTP_GET, []() {
-    stored.load();
-    zkwire::CivilTime rtc;
-    const bool rtcReady = rtcClock.trustworthy(rtc);
-    String out = "{\"ok\":true,\"ssid\":\"" + zkJsonEscape(net.ssid) +
-      "\",\"zk_ip\":\"" + zkJsonEscape(net.zkIp) +
-      "\",\"ap_name\":\"" + zkJsonEscape(net.currentApName()) +
-      "\",\"idle\":" + String(screenIdle.timeout()) +
-      ",\"armed\":" + String(localArm.allowed() ? "true" : "false") +
-      ",\"arm_seconds\":" + String(localArm.seconds()) +
-      ",\"rtc_ready\":" + String(rtcReady ? "true" : "false") +
-      ",\"rtc_time\":\"" + (rtcReady ? zkJsonEscape(M5Clock::asString(rtc)) :
-      String("")) + "\",\"items\":[";
-    for (uint8_t i=0; i<stored.count; ++i) {
-      if (i) out += ",";
-      out += "{\"name\":\"" + zkJsonEscape(stored.items[i].name) +
-        "\",\"datetime\":\"" + zkJsonEscape(stored.items[i].datetime) + "\"}";
-    }
-    out += "]}";
-    server.sendHeader("Cache-Control", "no-store");
-    server.sendHeader("Connection","close");
-    server.send(200, "application/json; charset=utf-8", out);
-  });
-  server.on("/api/m8/save", HTTP_POST, []() {
-    // A physically approved session for nonsecret edits. HTTP over an
-    // untrusted Wi-Fi is not secure: never accept station passwords here.
-    if (!server.hasHeader("X-ZK-Edit") ||
-        server.header("X-ZK-Edit") != "1" ||
-        !(localArm.allowed() || net.setupClient(server))) {
-      server.send(403, "application/json",
-        "{\"ok\":false,\"error\":\"اضغط A وB معاً 2 ثانية على M5 ثم أعد الحفظ\"}");
-      return;
-    }
-    String action=server.arg("action");
-    if (action=="presets") {
-      M5Preset proposed[M5Presets::kMax];
-      uint8_t n=0;
-      bool invalid=false;
-      for (uint8_t i=0; i<M5Presets::kMax; ++i) {
-        String name=server.arg("n"+String(i));
-        String datetime=server.arg("v"+String(i));
-        name.trim(); datetime.trim();
-        if (!name.length() && !datetime.length()) continue;
-        if (datetime.length()==16) datetime += ":00";
-        if (!name.length() || name.length()>24 ||
-            !M5Presets::validDateTime(datetime) || name.indexOf('|')>=0)
-          invalid=true;
-        if (!invalid) proposed[n++]={name,datetime};
-      }
-      if (invalid || !stored.save(proposed,n)) {
-        server.send(400,"application/json",
-          "{\"ok\":false,\"error\":\"تحقق من اسم الأمر والتاريخ والوقت الكامل\"}");
-        return;
-      }
-      if (selectedPreset>stored.count) selectedPreset=stored.count;
-      localArm.revoke();
-      statusLine="PRESETS SAVED";
-      drawScreen();
-      server.send(200,"application/json",
-        "{\"ok\":true,\"message\":\"انحفظت الأوامر على M5\"}");
-    } else if (action=="settings") {
-      String name=server.arg("apname");
-      String idleText=server.arg("idle");
-      bool validName=name.length()>=4 && name.length()<=24;
-      for (unsigned i=0;i<name.length();++i) {
-        char c=name[i];
-        if (!((c>='A'&&c<='Z') || (c>='a'&&c<='z') ||
-              (c>='0'&&c<='9') || c=='-' || c=='_')) validName=false;
-      }
-      uint16_t idle=65535;
-      if (idleText=="0") idle=0;
-      if (idleText=="15") idle=15;
-      if (idleText=="30") idle=30;
-      if (idleText=="60") idle=60;
-      if (idleText=="120") idle=120;
-      if (!validName || !ScreenIdle::valid(idle)) {
-        server.send(400,"application/json",
-          "{\"ok\":false,\"error\":\"اسم الشبكة أو مدة النوم غير صالحة\"}");
-        return;
-      }
-      Preferences p;
-      if (!p.begin("zk-net",false)) {
-        server.send(503,"application/json",
-          "{\"ok\":false,\"error\":\"تعذر فتح إعدادات الجهاز\"}");
-        return;
-      }
-      size_t wrote=p.putString("apname",name);
-      p.end();
-      if (!wrote || !screenIdle.save(idle)) {
-        server.send(503,"application/json",
-          "{\"ok\":false,\"error\":\"لم تكتمل عملية الحفظ\"}");
-        return;
-      }
-      net.savedApName=name;
-      localArm.revoke();
-      server.send(200,"application/json",
-        "{\"ok\":true,\"message\":\"تم حفظ اسم الشبكة ووقت نوم الشاشة\"}");
-    } else {
-      server.send(400,"application/json",
-        "{\"ok\":false,\"error\":\"العملية غير معروفة\"}");
-    }
-  });
-  server.on("/api/m8/select", HTTP_POST, []() {
-    // Choose shortcut only. No remote clock SET_TIME, ever.
-    if (!server.hasHeader("X-ZK-Edit") ||
-        server.header("X-ZK-Edit") != "1" ||
-        !(localArm.allowed() || net.setupClient(server))) {
-      server.send(403,"application/json",
-        "{\"ok\":false,\"error\":\"اضغط A وB معاً ثانيتين لتفعيل التجهيز\"}");
-      return;
-    }
-    String text=server.arg("index");
-    stored.load();
-    if (text.length()<1 || text.length()>2) {
-      server.send(400,"application/json",
-        "{\"ok\":false,\"error\":\"رقم الأمر غير صحيح\"}");return;
-    }
-    for(unsigned i=0;i<text.length();++i) if(text[i]<'0'||text[i]>'9') {
-      server.send(400,"application/json",
-        "{\"ok\":false,\"error\":\"رقم الأمر غير صحيح\"}");return;
-    }
-    int index=text.toInt();
-    if (index>stored.count) {
-      server.send(400,"application/json",
-        "{\"ok\":false,\"error\":\"هذا الأمر غير موجود\"}");return;
-    }
-    selectedPreset=index;
-    statusLine="SELECTED ON M5";
-    localArm.revoke();
-    drawScreen();
-    server.send(200,"application/json",
-      "{\"ok\":true,\"message\":\"انحدد الأمر على M5. الضغط المطول B للتنفيذ عند تأهيله\"}");
-  });
-  server.on("/api/presets", HTTP_GET, []() {
-    stored.load();
-    zkwire::CivilTime checkedRtc;
-    String json = "{\"ok\":true,\"rtc_ready\":" +
-      String(rtcClock.trustworthy(checkedRtc) ? "true" : "false") + ",\"items\":[";
-    for (uint8_t i=0; i<stored.count; ++i) {
-      if (i) json += ",";
-      json += "{\"name\":\"" + zkJsonEscape(stored.items[i].name) +
-        "\",\"datetime\":\"" + zkJsonEscape(stored.items[i].datetime) + "\"}";
-    }
-    json += "]}";
-    server.sendHeader("Cache-Control","no-store");
-    server.send(200, "application/json; charset=utf-8",json);
-  });
-  server.on("/manifest.webmanifest", HTTP_GET, []() {
-    server.sendHeader("Cache-Control", "no-store");
-    server.send(200,"application/manifest+json",
-      "{\"name\":\"ZKTeco M5 Clock\",\"short_name\":\"ZK M5\","
-      "\"start_url\":\"/\",\"display\":\"standalone\","
-      "\"theme_color\":\"#0c1725\",\"background_color\":\"#0c1725\","
-      "\"icons\":[{\"src\":\"/icon.svg\",\"sizes\":\"any\","
-      "\"type\":\"image/svg+xml\"}]}");
-  });
-  server.on("/icon.svg", HTTP_GET, []() {
-    server.send(200,"image/svg+xml",
-      "<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'"
-      " viewBox='0 0 180 180'><rect width='180' height='180' rx='32'"
-      " fill='#0c1725'/><circle cx='90' cy='90' r='62' fill='#2376cf'/>"
-      "<path d='M90 48v43h33' stroke='white' stroke-width='11'"
-      " stroke-linecap='round' fill='none'/></svg>");
-  });
-  server.on("/", HTTP_GET, []() {
-    server.sendHeader("Cache-Control", "no-store");
-    server.sendHeader("Connection","close");
-    server.send_P(200, "text/html; charset=utf-8", M8_HOME);
-  });
-  server.on("/api/read", HTTP_GET, []() {
-    // An open campus WLAN is not trusted. Bound the rate of device reads
-    // so repeated unauthenticated HTTP requests cannot continuously occupy it.
-    if (lastHttpRead && millis() - lastHttpRead < 8000) {
-      server.sendHeader("Cache-Control", "no-store");
-      server.send(429, "application/json", "{\"ok\":false,\"error\":\"Read rate limited (8 seconds)\"}");
-      return;
-    }
-    lastHttpRead = millis();
-    String clock, error;
-    uint32_t ms = 0;
-    const bool ok = readDeviceClock(clock, error, ms);
-    server.sendHeader("Cache-Control", "no-store");
-    if (ok) {
-      lastClock = clock;
-      statusLine = "READ OK";
-      server.send(200, "application/json",
-                  "{\"ok\":true,\"device_time\":\"" + clock +
-                  "\",\"duration_ms\":" + String(ms) + "}");
-    } else {
-      statusLine = "READ FAILED";
-      // Fixed internal error classes only; no credentials in responses.
-      error.replace("\"", "'");
-      server.send(503, "application/json",
-                  "{\"ok\":false,\"error\":\"" + error + "\"}");
-    }
-    drawScreen();
-  });
-  server.onNotFound([]() {
-    server.send(404, "text/plain", "Not found. Read-only endpoints only.");
-  });
-  // Initial credential enrollment and credential recovery are local-only,
-  // available from the physically selected WPA2 setup AP. They are never
-  // exposed over campus Wi-Fi nor served by the HTTPS login endpoint.
-  server.on("/auth/setup",HTTP_GET,[](){
-    if (!net.setupClient(server)) {
-      server.send(403,"text/plain","Requires protected M5 setup WiFi");return;
-    }
-    String page=zkPageBegin("تعيين حساب ZK Clock");
-    page+="<p>حساب الجهاز ثابت ويشتغل على HTTPS. تقدر تختار "
-      "المستخدم والباسورد مرة واحدة، وSafari راح يتذكر الجلسة.</p>"
-      "<p>إعدادات الدخول تتغير هنا فقط، على شبكة M5 المحمية.</p>"
-      "<form method='post' action='/auth/setup'>"
-      "<label>المستخدم</label><input name='user' value='operator'"
-      " minlength='3' maxlength='24' autocomplete='username' required>"
-      "<label>كلمة مرور ثابتة (12 حرف على الأقل)</label>"
-      "<input type='password' name='pass' minlength='12' maxlength='96'"
-      " autocomplete='new-password' required>"
-      "<button type='submit'>حفظ الحساب وإلغاء الجلسات السابقة</button></form>"
-      "<p>قبل دخول HTTPS، ثبت شهادة الثقة المحلية المنشأة على الماك "
-      "للـM5. لا تتجاوز تحذير الشهادة.</p>";
-    page+=zkPageEnd();
-    server.sendHeader("Cache-Control","no-store");
-    server.send(200,"text/html; charset=utf-8",page);
-  });
-  server.on("/auth/setup",HTTP_POST,[](){
-    if(!net.setupClient(server)){
-      server.send(403,"text/plain","Requires protected setup WiFi");return;
-    }
-    if(!sessions.configure(server.arg("user"),server.arg("pass"))){
-      server.send(400,"text/plain","Invalid user/password or could not save");
-      return;
-    }
-    String page=zkPageBegin("الحساب محفوظ");
-    page+="<p>انحفظ الحساب على M5 وانلغت كل جلسات الأجهزة القديمة. "
-      "اختار CONNECT على الجهاز، ثم افتح https://zkclock.local/ "
-      "من الآيفون بعد تثبيت شهادة الثقة.</p>";
-    page+=zkPageEnd();
-    server.send(200,"text/html; charset=utf-8",page);
-  });
-  const char* m8Headers[]={"X-ZK-Edit"};
-  server.collectHeaders(m8Headers,1);
-  server.begin();
-  setupRoutesRegistered = true;
-  serverStarted = true;
-}
-
 
 bool allowedHttps() {
   if (!sessions.allowedCookie(secureServer.header("Cookie"))) {
@@ -916,6 +657,48 @@ bool copyM9Presets(M5Preset* proposal,uint8_t& length) {
 }
 
 void initSecureRoutes() {
+  // Register network and local maintenance pages on HTTPS only. Their
+  // mutating routes require physical SETUP AP and same-origin form posts.
+  net.attachRoutes(secureServer,screenIdle);
+  stored.routes(secureServer,net);
+  rtcClock.routes(secureServer,net);
+  secureServer.on("/auth/setup",HTTP_GET,[](){
+    if (!net.setupClient(secureServer)) {
+      secureServer.send(403,"text/plain","Requires protected M5 setup WiFi");return;
+    }
+    String page=zkPageBegin("تعيين حساب ZK Clock");
+    page+="<p>https://zkclock.local/auth/setup</p><p>حساب الجهاز ثابت ويشتغل على HTTPS. تقدر تختار "
+      "المستخدم والباسورد مرة واحدة، وSafari راح يتذكر الجلسة.</p>"
+      "<p>إعدادات الدخول تتغير هنا فقط، على شبكة M5 المحمية.</p>"
+      "<form method='post' action='/auth/setup'>"
+      "<label>المستخدم</label><input name='user' value='operator'"
+      " minlength='3' maxlength='24' autocomplete='username' required>"
+      "<label>كلمة مرور ثابتة (12 حرف على الأقل)</label>"
+      "<input type='password' name='pass' minlength='12' maxlength='96'"
+      " autocomplete='new-password' required>"
+      "<button type='submit'>حفظ الحساب وإلغاء الجلسات السابقة</button></form>"
+      "<p>قبل دخول HTTPS، ثبت شهادة الثقة المحلية المنشأة على الماك "
+      "للـM5. لا تتجاوز تحذير الشهادة.</p>";
+    page+=zkPageEnd();
+    secureServer.sendHeader("Cache-Control","no-store");
+    secureServer.send(200,"text/html; charset=utf-8",page);
+  });
+  secureServer.on("/auth/setup",HTTP_POST,[](){
+    if(!net.setupClient(secureServer)){
+      secureServer.send(403,"text/plain","Requires protected setup WiFi");return;
+    }
+    if(!sessions.configure(secureServer.arg("user"),secureServer.arg("pass"))){
+      secureServer.send(400,"text/plain","Invalid user/password or could not save");
+      return;
+    }
+    String page=zkPageBegin("الحساب محفوظ");
+    page+="<p>انحفظ الحساب على M5 وانلغت كل جلسات الأجهزة القديمة. "
+      "اختار CONNECT على الجهاز، ثم افتح https://zkclock.local/ "
+      "من الآيفون بعد تثبيت شهادة الثقة.</p><a href='/setup'>رجوع للإعدادات</a>";
+    page+=zkPageEnd();
+    secureServer.send(200,"text/html; charset=utf-8",page);
+  });
+
   // PWA resources must be served over the same authenticated HTTPS origin.
   secureServer.on("/manifest.webmanifest",HTTP_GET,[](){
     secureServer.sendHeader("Cache-Control","public, max-age=3600");
@@ -954,6 +737,10 @@ void initSecureRoutes() {
     secureJson(200,"{\"ok\":true}");
   });
   secureServer.on("/",HTTP_GET,[](){
+    if(screenMode==ScreenMode::SETUP && net.apOn){
+      secureServer.sendHeader("Location","/setup");
+      secureServer.send(302,"text/plain","");return;
+    }
     if (!sessions.allowedCookie(secureServer.header("Cookie"))) {
       secureServer.sendHeader("Location","/login");
       secureServer.send(302,"text/plain","");
@@ -1102,12 +889,13 @@ void initSecureRoutes() {
                                     kM5TlsServerCert,sizeof(kM5TlsServerCert));
 }
 void secureServiceTick() {
-  if(screenMode!=ScreenMode::CONNECT)return;
-  if(WiFi.status()!=WL_CONNECTED) {
-    if(secureStarted) {secureServer.close();secureStarted=false;}
+  const bool canServe=(screenMode==ScreenMode::SETUP && net.apOn) ||
+    (screenMode==ScreenMode::CONNECT && WiFi.status()==WL_CONNECTED);
+  if(!canServe) {
+    if(secureStarted){secureServer.close();secureStarted=false;}
     return;
   }
-  if(!secureStarted) {secureServer.begin();secureStarted=true;}
+  if(!secureStarted){secureServer.begin();secureStarted=true;}
   secureServer.handleClient();
 }
 
@@ -1133,7 +921,7 @@ void connectWifiIfNeeded() {
     statusLine = "WIFI DISCONNECTED";
     drawScreen();
   }
-  if (net.apOn && !serverStarted) startHttpOnce();
+
 }
 
 } // namespace
@@ -1167,7 +955,6 @@ void loop() {
       wakeBlockUntilRelease = true;
       drawScreen();
     }
-    if (net.apOn && serverStarted) server.handleClient();
     secureServiceTick();
     delay(15);
     return;
@@ -1224,10 +1011,10 @@ void loop() {
         // Advertise the same friendly address in setup mode when phone/mDNS
         // supports it. The documented 192.168.4.1 fallback always remains.
         if (!mdnsRunning && MDNS.begin("zkclock")) {
-          MDNS.addService("http","tcp",80);
+          MDNS.addService("https","tcp",443);
           mdnsRunning = true;
         }
-        startHttpOnce();
+        secureServiceTick();
       }
       drawScreen();
     } else if (M5.BtnB.wasPressed()) {
@@ -1249,7 +1036,6 @@ void loop() {
       buttonBLatched = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
       net.stopAP();
-      if(serverStarted){server.stop();serverStarted=false;}
       screenMode = ScreenMode::BOOT;
       drawScreen();
     }
@@ -1289,7 +1075,6 @@ void loop() {
       longShiftHold = false;
     }
   }
-  if(net.apOn && serverStarted) server.handleClient();
   secureServiceTick();
   delay(15);
 }
