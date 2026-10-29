@@ -97,6 +97,9 @@ class M5Clock {
 
   void routes(WebServer& server, NetworkSetup& net) {
     server.on("/rtc",HTTP_GET,[this,&server,&net]() {
+      if(!net.setupClient(server)) {
+        server.send(403,"text/plain","SETUP AP only");return;
+      }
       const bool canCalibrate = net.setupClient(server);
       zkwire::CivilTime t;
       bool good = trustworthy(t);

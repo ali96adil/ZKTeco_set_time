@@ -1,4 +1,4 @@
-"""Release v1.0.0-rc1 regression guards; offline only."""
+"""Release v1.0.0 production regression guards; offline only."""
 from pathlib import Path
 import unittest
 
@@ -23,7 +23,7 @@ class ReleaseSafety(unittest.TestCase):
 
     def test_no_unqualified_auto_writes_and_cooldown(self):
         self.assertIn('#define ZK_ENABLE_M5_TIME_WRITE 0',SRC)
-        self.assertIn('constexpr uint32_t kClockWriteCooldownMs = 10000',SRC)
+        self.assertIn('constexpr uint32_t kClockWriteCooldownMs = 2000',SRC)
         self.assertIn('hasClockWriteAttempt = true',SRC)
         self.assertIn('millis() - lastClockWriteAttempt < kClockWriteCooldownMs',SRC)
         self.assertIn('if (selectedPreset == stored.count && !rtcClock.trustworthy(target))',SRC)
@@ -42,10 +42,11 @@ class ReleaseSafety(unittest.TestCase):
 
     def test_release_compilation_targets_and_crypto(self):
         self.assertIn('board_build.partitions = huge_app.csv',PLAT)
-        self.assertIn('[env:m5stickc-plus-readonly]',PLAT)
+        self.assertIn('default_envs = m5stickc-plus-production',PLAT)
+        self.assertIn('[env:m5stickc-plus-production]',PLAT)
         self.assertIn('[env:m5stickc-plus-secure-write-lab]',PLAT)
         self.assertIn('test_release_v1.py',WORKFLOW)
-        self.assertIn('release/v1.0.0-rc1',WORKFLOW)
+        self.assertIn('release/v1.0.0-full-control',WORKFLOW)
         self.assertIn('m5_tls_local.h', (R/".gitignore").read_text())
         self.assertTrue((R/"docs/RELEASE_V1_RC1.md").exists())
 

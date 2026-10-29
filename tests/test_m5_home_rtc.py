@@ -29,7 +29,7 @@ class HomeAndRTC(unittest.TestCase):
         self.assertIn("MDNS.begin(\"zkclock\")",main)
         self.assertIn("SYNC FROM M5 RTC",main)
         self.assertIn("rtcClock.trustworthy(target)",main)
-        self.assertIn('rtcClock.routes(server, net)',main)
+        self.assertIn('rtcClock.routes(secureServer,net)',main)
         self.assertIn("M5.Rtc.GetDate",rtc)
         self.assertIn("M5.Rtc.GetTime",rtc)
         self.assertIn("M5.Rtc.SetDate",rtc)

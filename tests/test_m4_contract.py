@@ -33,13 +33,13 @@ class M4Contract(unittest.TestCase):
         self.assertNotIn("millis() - startedAt",network)
         self.assertNotIn("if (!apOn && millis()",network)
 
-    def test_lcd_preset_run_requires_physical_hold_and_default_disabled(self):
+    def test_lcd_preset_run_requires_physical_hold_and_production_enabled(self):
         main=(ROOT/"src/main.cpp").read_text(encoding="utf-8")
         self.assertIn("#define ZK_ENABLE_M5_TIME_WRITE 0",main)
         self.assertIn("executeSelected(false)",main)
         self.assertIn("executeSelected(true)",main)
-        self.assertIn("WRITE LAB DISABLED",main)
-        self.assertIn("stored.routes(server, net)",main)
+        self.assertIn("m5stickc-plus-production", (ROOT/"platformio.ini").read_text())
+        self.assertIn("stored.routes(secureServer,net)",main)
         self.assertNotIn('server.on("/api/set"',main)
 
 if __name__=="__main__":

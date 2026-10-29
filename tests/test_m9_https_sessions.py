@@ -15,15 +15,18 @@ PIO=(ROOT/"platformio.ini").read_text()
 GITIGNORE=(ROOT/".gitignore").read_text()
 
 class SecureM9Tests(unittest.TestCase):
-    def test_http_not_used_in_station_mode(self):
+    def test_https_shared_between_station_and_ap(self):
         self.assertIn("ESPWebServerSecure secureServer(443)",MAIN)
-        self.assertIn("WebServer server(80); // Private WPA2 setup AP only",MAIN)
-        self.assertIn("if (net.apOn && !serverStarted) startHttpOnce();",MAIN)
-        self.assertIn("if(net.apOn && serverStarted) server.handleClient()",MAIN)
+        self.assertNotIn("WebServer server(80)",MAIN)
+        self.assertNotIn("startHttpOnce()",MAIN)
+        self.assertIn("net.attachRoutes(secureServer,screenIdle)",MAIN)
+        self.assertIn("stored.routes(secureServer,net)",MAIN)
+        self.assertIn("rtcClock.routes(secureServer,net)",MAIN)
+        self.assertIn("screenMode==ScreenMode::SETUP && net.apOn",MAIN)
+        self.assertIn("screenMode==ScreenMode::CONNECT && WiFi.status()==WL_CONNECTED",MAIN)
         self.assertIn("secureServiceTick();",MAIN)
+        self.assertIn('MDNS.addService("https","tcp",443)',MAIN)
         self.assertIn('MDNS.addService("https", "tcp", 443)',MAIN)
-        self.assertIn('Serial.println("Bonjour secure station: https://zkclock.local/")',MAIN)
-        self.assertIn('if(serverStarted){server.stop();serverStarted=false;}',MAIN)
 
     def test_persistent_sliding_recall_revocation(self):
         self.assertIn('Max-Age=31536000; Secure; HttpOnly; SameSite=Strict',SESS)
@@ -32,8 +35,8 @@ class SecureM9Tests(unittest.TestCase):
         self.assertIn("revokeAll()",SESS)
         self.assertIn('secureServer.on("/api/m9/revoke",HTTP_POST',MAIN)
         self.assertIn('secureServer.on("/auth/login",HTTP_POST',MAIN)
-        self.assertIn('server.on("/auth/setup",HTTP_POST',MAIN)
-        self.assertIn('net.setupClient(server)',MAIN)
+        self.assertIn('secureServer.on("/auth/setup",HTTP_POST',MAIN)
+        self.assertIn('net.setupClient(secureServer)',MAIN)
         self.assertIn('p.putString("hash",digest)',SESS)
         self.assertIn('p.putString("s0",tokenHash)',SESS)
         self.assertNotIn('p.putString("pass",pass)',SESS)
