@@ -165,9 +165,10 @@ class M5Presets {
       if (!n || !save(values, n)) {
         server.send(400, "text/plain", "Could not save imported commands"); return;
       }
-      server.send(200, "text/html; charset=utf-8",
-        "<meta charset='utf-8'><h3>تم استيراد الاختصارات</h3>"
-        "<p>اختار وضع الاتصال على شاشة M5 حتى تتصفحها.</p>");
+      String page=zkPageBegin("تم استيراد الاختصارات");
+      page += "<p>تم حفظ الأوامر على M5. افتح وضع CONNECT لعرضها.</p>"
+              "<a href='/presets'>عرض الاختصارات</a>" + zkPageEnd();
+      server.send(200,"text/html; charset=utf-8",page);
     });
     server.on("/presets", HTTP_POST, [this, &server, &net]() {
       if (!net.setupClient(server)) {
@@ -191,10 +192,10 @@ class M5Presets {
         server.send(500, "text/plain", "Could not persist presets");
         return;
       }
-      server.send(200, "text/html; charset=utf-8",
-        "<meta charset='utf-8'><h3>تم حفظ الأوامر</h3>"
-        "<p>ارجع إلى M5 واختر الاتصال بالشبكة لتصفح الاختصارات.</p>"
-        "<a href='/presets'>تعديل الاختصارات</a>");
+      String page=zkPageBegin("تم حفظ الأوامر");
+      page += "<p>الأوامر انحفظت على M5. افتح CONNECT للتصفح.</p>"
+              "<a href='/presets'>رجوع للاختصارات</a>" + zkPageEnd();
+      server.send(200,"text/html; charset=utf-8",page);
     });
   }
 };
