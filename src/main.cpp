@@ -60,6 +60,7 @@ uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
 bool serverStarted = false;
+bool setupRoutesRegistered = false;
 
 bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   const uint32_t start = millis();
@@ -583,7 +584,7 @@ void drawScreen() {
   M5.Lcd.drawString("ZKTeco CLOCK",7,3,2);
   M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ? "WIFI CONNECTED" : "CONNECTING...",7,23,2);
   if (WiFi.status()==WL_CONNECTED)
-    M5.Lcd.drawString("zkclock.local",7,43,2);
+    M5.Lcd.drawString("https://zkclock.local",7,43,1);
   stored.load();
   if (selectedPreset > stored.count) selectedPreset = 0;
   M5.Lcd.drawString(String(selectedPreset + 1) + "/" + String(stored.count+1),7,63,2);
@@ -601,7 +602,8 @@ void drawScreen() {
 }
 
 void startHttpOnce() {
-  if (serverStarted) return;
+  if(serverStarted)return;
+  if(setupRoutesRegistered){server.begin();serverStarted=true;return;}
   net.attachRoutes(server, screenIdle);
   stored.routes(server, net);
   rtcClock.routes(server, net);
@@ -810,6 +812,7 @@ void startHttpOnce() {
   const char* m8Headers[]={"X-ZK-Edit"};
   server.collectHeaders(m8Headers,1);
   server.begin();
+  setupRoutesRegistered = true;
   serverStarted = true;
 }
 
@@ -1040,9 +1043,9 @@ void connectWifiIfNeeded() {
   const bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !reported) {
     if (!mdnsRunning && MDNS.begin("zkclock")) {
-      MDNS.addService("http", "tcp", 80);
+      MDNS.addService("https", "tcp", 443);
       mdnsRunning = true;
-      Serial.println("Bonjour local address: http://zkclock.local/");
+      Serial.println("Bonjour secure station: https://zkclock.local/");
     }
     reported = true;
     statusLine = "WIFI CONNECTED";
@@ -1056,7 +1059,7 @@ void connectWifiIfNeeded() {
     statusLine = "WIFI DISCONNECTED";
     drawScreen();
   }
-  if ((connected || net.apOn) && !serverStarted) startHttpOnce();
+  if (net.apOn && !serverStarted) startHttpOnce();
 }
 
 } // namespace
@@ -1074,6 +1077,7 @@ void setup() {
   static const char chars[]="0123456789abcdef";
   for(uint8_t i:nonce){csrfToken+=chars[i>>4];csrfToken+=chars[i&15];}
   // No network write to attendance device on startup.
+  initSecureRoutes();
   connectWifiIfNeeded();
   drawScreen();
 }
@@ -1089,16 +1093,16 @@ void loop() {
       wakeBlockUntilRelease = true;
       drawScreen();
     }
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
   screenIdle.update();
   if (screenIdle.sleeping()) {
     if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -1107,8 +1111,8 @@ void loop() {
   if (wakeBlockUntilRelease) {
     if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
       wakeBlockUntilRelease = false;
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -1120,7 +1124,7 @@ void loop() {
       statusLine="WEB EDIT 90s";
       drawScreen();
     }
-    if (serverStarted && WiFi.status()==WL_CONNECTED) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -1129,8 +1133,8 @@ void loop() {
   if (comboLatched) {
     if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
       comboLatched=false;
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -1140,6 +1144,7 @@ void loop() {
       localArm.revoke();
       showSetupQr = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning=false; }
+      if(secureStarted){secureServer.close();secureStarted=false;}
       net.startAP();
       if (net.apOn) {
         // Advertise the same friendly address in setup mode when phone/mDNS
@@ -1170,6 +1175,7 @@ void loop() {
       buttonBLatched = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
       net.stopAP();
+      if(serverStarted){server.stop();serverStarted=false;}
       screenMode = ScreenMode::BOOT;
       drawScreen();
     }
@@ -1182,6 +1188,7 @@ void loop() {
     if (M5.BtnA.pressedFor(3000) && !buttonALatched) {
       buttonALatched = true;
       WiFi.disconnect(false, false);
+      if(secureStarted){secureServer.close();secureStarted=false;}
       screenMode = ScreenMode::BOOT;
       drawScreen();
     }
@@ -1208,7 +1215,7 @@ void loop() {
       longShiftHold = false;
     }
   }
-  if ((WiFi.status() == WL_CONNECTED || net.apOn) && serverStarted)
-    server.handleClient();
+  if(net.apOn && serverStarted) server.handleClient();
+  secureServiceTick();
   delay(15);
 }
