@@ -49,6 +49,9 @@ openssl x509 -req -sha256 -days 7 \
   -CA .secrets/ca.crt -CAkey .secrets/ca.key -CAcreateserial \
   -extfile .secrets/server.ext -out .secrets/mac.crt
 chmod 600 .secrets/*.key
+# CA is not needed again after signing the one server certificate. Delete the
+# powerful CA private key to reduce the risk if the Mac is later compromised.
+rm -f .secrets/ca.key .secrets/mac.csr .secrets/ca.srl
 cp .secrets/ca.crt .secrets/ZKTeco_Local_CA.cer
 
 echo
@@ -59,5 +62,5 @@ echo "CA SHA256 fingerprint (verify before installing/trusting):"
 openssl x509 -in .secrets/ca.crt -noout -fingerprint -sha256
 echo "Server hostname/IP:"
 openssl x509 -in .secrets/mac.crt -noout -ext subjectAltName
-echo "Do NOT share .secrets/ca.key or .secrets/mac.key."
+echo "The CA private key was deleted after signing. Never share .secrets/mac.key."
 echo "IMPORTANT: Trusting any root CA on iPhone is powerful. Remove after test."
