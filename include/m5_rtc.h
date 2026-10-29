@@ -7,6 +7,7 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include "m5_presets.h"
+#include "web_navigation.h"
 #include "zk_wire.h"
 
 class M5Clock {
@@ -96,36 +97,35 @@ class M5Clock {
 
   void routes(WebServer& server, NetworkSetup& net) {
     server.on("/rtc",HTTP_GET,[this,&server,&net]() {
-      if (!net.setupClient(server)) {
-        server.send(403,"text/plain","Requires physical M5 setup network");
-        return;
-      }
+      const bool canCalibrate = net.setupClient(server);
       zkwire::CivilTime t;
       bool good = trustworthy(t);
       String current = get(t) ? asString(t) : "RTC INVALID";
-      String page =
-        "<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>M5 RTC calibration</title></head>"
-        "<body style='font:18px system-ui;background:#152438;color:white;padding:18px'>"
-        "<h2>مزامنة ساعة M5 الداخلية</h2>"
-        "<p>ساعة M5 الحالية: <b dir='ltr'>" + current + "</b></p>"
-        "<p>المعايرة: " + String(good ? "حديثة" : "غير صالحة/قديمة") + "</p>"
-        "<p>تحقق أولاً من صحة ساعة الآيفون. اضغط للضبط من وقت الهاتف الحالي.</p>"
-        "<button id='sync' style='padding:16px;font:inherit'>ضبط ساعة M5 من الهاتف</button>"
-        "<p id='status'></p><script>"
-        "document.getElementById('sync').onclick=async()=>{"
-        "const p=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Baghdad',"
-        "year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',"
-        "minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date());"
-        "const m=Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));"
-        "const v=m.year+'-'+m.month+'-'+m.day+'T'+m.hour+':'+m.minute+':'+m.second;"
-        "const r=await fetch('/rtc/calibrate',{method:'POST',"
-        "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
-        "body:new URLSearchParams({datetime:v})});"
-        "document.getElementById('status').textContent="
-        "r.ok?'تم ضبط الساعة؛ أعد فتح الصفحة للتأكد':'فشل ضبط ساعة M5';"
-        "};</script></body></html>";
+      String page = zkPageBegin("ساعة M5 الداخلية RTC");
+      page += "<p>ساعة M5: <b dir='ltr'>" + current + "</b></p>"
+        "<p>حالة المعايرة: <b>" +
+        String(good ? "صالحة خلال آخر 7 أيام" : "غير صالحة أو تحتاج تحديث") +
+        "</b></p>";
+      if (canCalibrate) {
+        page += "<p>تأكد أن وقت الآيفون صحيح قبل مزامنته مع M5.</p>"
+          "<button id='sync'>مزامنة ساعة M5 من الهاتف</button><p id='status'></p><script>"
+          "document.getElementById('sync').onclick=async()=>{"
+          "const p=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Baghdad',"
+          "year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',"
+          "minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date());"
+          "const m=Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));"
+          "const v=m.year+'-'+m.month+'-'+m.day+'T'+m.hour+':'+m.minute+':'+m.second;"
+          "const r=await fetch('/rtc/calibrate',{method:'POST',"
+          "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+          "body:new URLSearchParams({datetime:v})});"
+          "document.getElementById('status').textContent="
+          "r.ok?'تم ضبط الساعة؛ أعد فتح الصفحة للتأكد':'فشل ضبط ساعة M5';"
+          "};</script>";
+      } else {
+        page += "<p>هاي الصفحة للعرض فقط في CONNECT. لمزامنة RTC من الموبايل، "
+          "ارجع إلى SETUP واتصل بشبكة إعداد M5 المحمية، ثم افتح /rtc.</p>";
+      }
+      page += zkPageEnd();
       server.sendHeader("Cache-Control","no-store");
       server.send(200,"text/html; charset=utf-8",page);
     });

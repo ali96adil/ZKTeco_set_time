@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include "network_setup.h"
+#include "web_navigation.h"
 
 struct M5Preset {
   String name;
@@ -80,34 +81,48 @@ class M5Presets {
 
   void routes(WebServer& server, NetworkSetup& net) {
     server.on("/presets", HTTP_GET, [this, &server, &net]() {
-      if (!net.setupClient(server)) {
-        server.send(403, "text/plain", "Connect to M5 setup AP"); return;
+      // All network clients can read shortcut labels/timestamps; only the
+      // physically protected WPA2 setup network can modify their catalog.
+      load();
+      const bool editable = net.setupClient(server);
+      String page = zkPageBegin("الأوامر المحفوظة");
+      page += "<p>عدد الاختصارات: <b>" + String(count) +
+        "</b> من 8. الأوامر تحتوي التاريخ والساعة معاً.</p>";
+      if (count == 0)
+        page += "<p>ماكو اختصارات محفوظة حالياً.</p>";
+      for (uint8_t i=0; i<count; ++i) {
+        page += "<div style='padding:12px;margin:9px 0;border-radius:10px;"
+          "background:#1b3249'><b>" + String(i+1) + ". " +
+          NetworkSetup::safeHtml(items[i].name) +
+          "</b><div dir='ltr' style='text-align:right;font-variant-numeric:tabular-nums'>" +
+          NetworkSetup::safeHtml(items[i].datetime) + "</div></div>";
       }
-      String page = "<!doctype html><html lang='ar' dir='rtl'><head>"
-        "<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>M5 commands</title><style>body{font:16px system-ui;max-width:500px;"
-        "margin:2em auto;padding:1em;background:#142338;color:white}"
-        "input,button{display:block;width:100%;padding:10px;margin:9px 0;font:inherit}"
-        "button{background:#2984bb;color:white;border:0}</style></head><body>"
-        "<h2>أوامر التاريخ والوقت</h2><p>كل زر يحفظ التاريخ والساعة معاً."
-        " لا توجد أوامر تاريخ فقط أو ساعة فقط.</p>"
-        "<form method='post' action='/presets'>";
-      for (uint8_t i=0; i<kMax; ++i) {
-        page += "<fieldset><legend>اختصار " + String(i+1) + "</legend>"
-          "<input name='n" + String(i) + "' maxlength='24' placeholder='اسم الأمر' value='"
-          + NetworkSetup::safeHtml(items[i].name) + "'>"
-          "<input name='v" + String(i) + "' type='datetime-local' step='1' value='"
-          + NetworkSetup::safeHtml(items[i].datetime) + "'></fieldset>";
+      page += "<div style='padding:12px;background:#1b3249;border-radius:10px'>"
+        "<b>مزامنة من ساعة M5 RTC</b><p>تستخدم الساعة الداخلية بعد معايرتها من الهاتف.</p>"
+        "</div>";
+      page += "<p>للتنفيذ من الجهاز: اختر الاختصار بالزر A ثم اضغط B مطولاً. "
+        "نسخة القراءة فقط تعرض الاختصارات ولكن لا تغيّر ساعة البصمة.</p>";
+      if (editable) {
+        page += "<h3>تعديل الأوامر</h3>"
+          "<form method='post' action='/presets'>";
+        for (uint8_t i=0; i<kMax; ++i) {
+          page += "<fieldset><legend>اختصار " + String(i+1) + "</legend>"
+            "<input name='n" + String(i) + "' maxlength='24' placeholder='اسم الأمر' value='" +
+            NetworkSetup::safeHtml(items[i].name) + "'>"
+            "<input name='v" + String(i) + "' type='datetime-local' step='1' value='" +
+            NetworkSetup::safeHtml(items[i].datetime) + "'></fieldset>";
+        }
+        page += "<button type='submit'>حفظ الاختصارات على M5</button></form>"
+          "<h3>استيراد من الماك</h3>"
+          "<p>كل سطر: اسم|YYYY-MM-DDTHH:MM:SS</p>"
+          "<form action='/presets/import' method='post'>"
+          "<textarea name='bulk' rows='8' maxlength='1600'></textarea>"
+          "<button type='submit'>استيراد الأوامر</button></form>";
+      } else {
+        page += "<p style='background:#393023;padding:12px'>التعديل متاح فقط "
+          "من شبكة إعداد M5 الخاصة (SETUP)، مو من واي فاي الجامعة المفتوح.</p>";
       }
-      page += "<button type='submit'>حفظ الاختصارات على M5</button></form>"
-        "<hr><h3>استيراد الأوامر من الماك</h3>"
-        "<p>في واجهة الماك اضغط نسخ أوامر M5 ثم الصقها هنا."
-        " كل سطر يكون: اسم|YYYY-MM-DDTHH:MM:SS</p>"
-        "<form action='/presets/import' method='post'>"
-        "<textarea name='bulk' rows='9' maxlength='1600' style='width:100%;padding:10px'></textarea>"
-        "<button type='submit'>استيراد وحفظ</button></form>";
-        "<p>هذه إعدادات محلية على الجهاز، وليست تشغيل أوامر الساعة من المتصفح."
-        " للتنفيذ اختر الاختصار من أزرار M5 بعد الاتصال بالشبكة.</p></body></html>";
+      page += zkPageEnd();
       server.sendHeader("Cache-Control", "no-store");
       server.send(200, "text/html; charset=utf-8", page);
     });
@@ -150,9 +165,10 @@ class M5Presets {
       if (!n || !save(values, n)) {
         server.send(400, "text/plain", "Could not save imported commands"); return;
       }
-      server.send(200, "text/html; charset=utf-8",
-        "<meta charset='utf-8'><h3>تم استيراد الاختصارات</h3>"
-        "<p>اختار وضع الاتصال على شاشة M5 حتى تتصفحها.</p>");
+      String page=zkPageBegin("تم استيراد الاختصارات");
+      page += "<p>تم حفظ الأوامر على M5. افتح وضع CONNECT لعرضها.</p>"
+              "<a href='/presets'>عرض الاختصارات</a>" + zkPageEnd();
+      server.send(200,"text/html; charset=utf-8",page);
     });
     server.on("/presets", HTTP_POST, [this, &server, &net]() {
       if (!net.setupClient(server)) {
@@ -176,10 +192,10 @@ class M5Presets {
         server.send(500, "text/plain", "Could not persist presets");
         return;
       }
-      server.send(200, "text/html; charset=utf-8",
-        "<meta charset='utf-8'><h3>تم حفظ الأوامر</h3>"
-        "<p>ارجع إلى M5 واختر الاتصال بالشبكة لتصفح الاختصارات.</p>"
-        "<a href='/presets'>تعديل الاختصارات</a>");
+      String page=zkPageBegin("تم حفظ الأوامر");
+      page += "<p>الأوامر انحفظت على M5. افتح CONNECT للتصفح.</p>"
+              "<a href='/presets'>رجوع للاختصارات</a>" + zkPageEnd();
+      server.send(200,"text/html; charset=utf-8",page);
     });
   }
 };
