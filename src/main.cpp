@@ -706,6 +706,7 @@ void loop() {
   // First press only wakes the backlight; it must NEVER trigger a clock
   // adjustment on the same press/hold used to wake the screen.
   if (screenIdle.sleeping()) {
+    if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
       screenIdle.touch();
       drawScreen();
@@ -717,6 +718,7 @@ void loop() {
   }
   screenIdle.update();
   if (screenIdle.sleeping()) {
+    if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
     if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
       server.handleClient();
     delay(15);
