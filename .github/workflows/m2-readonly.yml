@@ -2,7 +2,7 @@ name: M5StickC Plus M2 read-only build
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets]
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets]
   pull_request:
 
 permissions:
@@ -54,6 +54,8 @@ jobs:
         run: cp include/config.example.h include/config.h
       - name: Build M5StickC Plus firmware
         run: pio run -e m5stickc-plus-readonly
+      - name: Compile physical-button time-write code path (NO UPLOAD)
+        run: pio run -e m5stickc-plus-write-lab
       - name: Upload firmware binary for qualified review
         uses: actions/upload-artifact@v4
         with:
