@@ -2,6 +2,7 @@
 // Target board: M5StickC Plus (original) + ESP32 Arduino.
 // No users, attendance records, biometric data or admin credentials accessed.
 #include <Arduino.h>
+#include <cstring>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <M5StickCPlus.h>
@@ -19,6 +20,7 @@ constexpr size_t MAX_PACKET_BODY = 64;
 constexpr uint32_t TIMEOUT_MS = 5000;
 WebServer server(80);
 uint32_t lastWifiAttempt = 0;
+uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
 bool serverStarted = false;
@@ -390,7 +392,7 @@ void drawScreen() {
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.println("ZKTeco clock");
   M5.Lcd.setTextSize(1);
-  M5.Lcd.println("M1 - READ ONLY");
+  M5.Lcd.println("M2 - READ ONLY");
   M5.Lcd.println(statusLine);
   if (WiFi.status() == WL_CONNECTED) {
     M5.Lcd.print("URL: http://");
@@ -407,6 +409,14 @@ void startHttpOnce() {
     server.send_P(200, "text/html; charset=utf-8", PAGE);
   });
   server.on("/api/read", HTTP_GET, []() {
+    // An open campus WLAN is not trusted. Bound the rate of device reads
+    // so repeated unauthenticated HTTP requests cannot continuously occupy it.
+    if (lastHttpRead && millis() - lastHttpRead < 8000) {
+      server.sendHeader("Cache-Control", "no-store");
+      server.send(429, "application/json", "{\"ok\":false,\"error\":\"Read rate limited (8 seconds)\"}");
+      return;
+    }
+    lastHttpRead = millis();
     String clock, error;
     uint32_t ms = 0;
     const bool ok = readDeviceClock(clock, error, ms);
@@ -434,16 +444,42 @@ void startHttpOnce() {
 }
 
 void connectWifiIfNeeded() {
+  static bool reportedConnected = false;
   if (WiFi.status() == WL_CONNECTED) {
     statusLine = "WIFI CONNECTED";
+    if (!reportedConnected) {
+      reportedConnected = true;
+      Serial.println("=== WIFI CONNECTED ===");
+      Serial.println("SSID: " + WiFi.SSID());
+      Serial.println("M5 IP: " + WiFi.localIP().toString());
+      Serial.println("Gateway: " + WiFi.gatewayIP().toString());
+      Serial.println("M5 STA MAC: " + WiFi.macAddress());
+      Serial.println("NOTE: Wi-Fi connected does NOT prove MikroTik Hotspot access.");
+      drawScreen();
+    }
     startHttpOnce();
     return;
+  }
+  if (reportedConnected) {
+    reportedConnected = false;
+    statusLine = "WIFI DISCONNECTED";
+    Serial.println("WIFI DISCONNECTED");
+    drawScreen();
   }
   if (millis() - lastWifiAttempt < 15000) return;
   lastWifiAttempt = millis();
   statusLine = "CONNECTING WIFI";
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD);
+  // ESP32 WiFi.begin accepts nullptr for genuinely open Wi-Fi networks.
+  // Captive-portal / MikroTik Hotspot login, if any, is a separate layer.
+  if (strlen(ZK_WIFI_PASSWORD) == 0) {
+    WiFi.setMinSecurity(WIFI_AUTH_OPEN);
+    WiFi.begin(ZK_WIFI_SSID);
+    Serial.println("Joining OPEN Wi-Fi (no passphrase)");
+  } else {
+    WiFi.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD);
+    Serial.println("Joining protected Wi-Fi");
+  }
   drawScreen();
 }
 } // namespace
