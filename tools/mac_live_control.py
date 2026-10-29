@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from mac_simulator import dashboard_html, parse_local_datetime
 from clock_presets import ShortcutStore, target_time
 from phone_pairing import PairingStore, get_cookie, cookie_header
+from shortcut_ui import shortcut_panel
 
 BAGHDAD = ZoneInfo("Asia/Baghdad")
 MAX_BODY = 512
@@ -375,6 +376,7 @@ e('liveApply').onclick=async()=>{
 </script>
 """.replace("CSRF_TOKEN_PLACEHOLDER",json.dumps(csrf_token))
         html = html.replace("</body>",script+"</body>",1)
+    html = html.replace("</main>", shortcut_panel(csrf_token, enable_write) + "</main>", 1)
     return html.encode("utf-8")
 
 
@@ -405,6 +407,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def authorized(self) -> bool:
         authorization = self.headers.get("Authorization","")
+        cookie = get_cookie(self.headers.get("Cookie", ""))
+        if self.server.pairing.authorized(cookie):
+            return True
         if not authorization.startswith("Basic "):
             return False
         try:
@@ -424,8 +429,38 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
-        if not self.require_auth():return
         path = urlsplit(self.path).path
+        if path == "/" and not self.authorized() and self.server.pairing.allow_new:
+            page = """<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>إقران الهاتف</title></head>
+<body style='font:18px system-ui;background:#152438;color:white;padding:20px;max-width:420px;margin:auto'>
+<h2>إقران هذا الهاتف مرة واحدة</h2>
+<p>أدخل الرمز المعروض على Terminal الماك. Safari راح يتذكر الهاتف لمدة 30 يوم بدون كلمة مرور يومية.</p>
+<input id='pairCode' inputmode='numeric' maxlength='8' placeholder='رمز الإقران'
+ style='padding:14px;font:inherit;width:90%'>
+<button id='pair' style='display:block;margin:14px 0;padding:14px;font:inherit'>إقران الهاتف</button>
+<p id='status'></p><script>
+document.getElementById('pair').onclick=async()=>{
+ const code=document.getElementById('pairCode').value;
+ try{
+  const r=await fetch('/api/pair',{method:'POST',
+    headers:{'Content-Type':'application/json'},credentials:'same-origin',
+    body:JSON.stringify({code})});
+  const j=await r.json();
+  if(!r.ok)throw Error(j.error||'Pairing refused');
+  location.replace('/');
+ }catch(e){document.getElementById('status').textContent=e.message;}
+};
+</script></body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.security_headers()
+            self.send_header("Content-Type","text/html; charset=utf-8")
+            self.send_header("Content-Length",str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+            return
+        if not self.require_auth():return
         if path=="/":
             payload=self.server.page
             self.send_response(200)
@@ -434,6 +469,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length",str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+            return
+        if path=="/api/shortcuts":
+            try:
+                self.reply(200,{"ok":True,"items":self.server.shortcuts.list()})
+            except Exception as exc:
+                self.reply(503,{"ok":False,"error":"Cannot read shortcuts: "+
+                                type(exc).__name__})
             return
         if path=="/api/read":
             try:
@@ -447,29 +489,67 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404,{"ok":False,"error":"Not found"})
 
     def do_POST(self) -> None:
-        if not self.require_auth():return
         path = urlsplit(self.path).path
-        if path not in ("/api/prepare","/api/apply") or not self.server.enable_write:
+        # Pairing is the only unauthenticated POST. One-time 8-digit code is
+        # shown on Mac console, 5 failed tries maximum, HTTPS mandatory.
+        if path == "/api/pair":
+            host=self.headers.get("Host","")
+            origin=self.headers.get("Origin","")
+            if not host or origin != "https://"+host:
+                self.reply(403,{"ok":False,"error":"Pairing origin rejected"});return
+            length=self.headers.get("Content-Length","")
+            if (self.headers.get("Content-Type","").split(";")[0].strip()!="application/json"
+                or not length.isdigit() or not 0 < int(length) <= 128):
+                self.reply(400,{"ok":False,"error":"Invalid pairing request"});return
+            try:
+                doc=json.loads(self.rfile.read(int(length)))
+                if not isinstance(doc,dict) or set(doc)!={"code"}:
+                    raise ValueError("Invalid pairing shape")
+                token=self.server.pairing.pair(doc["code"])
+            except (ValueError, OSError):
+                self.reply(403,{"ok":False,"error":"Invalid/expired pairing code"});return
+            payload=b'{"ok":true}'
+            self.send_response(200)
+            self.security_headers()
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(payload)))
+            self.send_header("Set-Cookie",cookie_header(token))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        if not self.require_auth():return
+        if path not in ("/api/shortcuts","/api/quick","/api/prepare","/api/apply"):
+            self.reply(404,{"ok":False,"error":"Unknown operation"});return
+        if path != "/api/shortcuts" and not self.server.enable_write:
             self.reply(404,{"ok":False,"error":"Live write unavailable"});return
-        # Browser same-origin and random CSRF header; Basic auth alone is
-        # insufficient to prevent a forged request from another website.
-        host = self.headers.get("Host","")
-        origin = self.headers.get("Origin","")
+        host=self.headers.get("Host","")
+        origin=self.headers.get("Origin","")
         if not host or origin != "https://"+host or \
            not secrets.compare_digest(self.headers.get("X-CSRF-Token",""),
                                       self.server.csrf_token):
             self.reply(403,{"ok":False,"error":"Origin/CSRF check failed"});return
         if self.headers.get("Content-Type","").split(";")[0].strip() != "application/json":
             self.reply(415,{"ok":False,"error":"Expected JSON"});return
-        length = self.headers.get("Content-Length","")
+        length=self.headers.get("Content-Length","")
         if not length.isdigit() or not 0 < int(length) <= MAX_BODY:
-            self.reply(413,{"ok":False,"error":"Invalid body size"});return
+            # Shortcut catalogs are limited to 12 entries; separate 4 KiB cap.
+            if path != "/api/shortcuts" or not length.isdigit() or not 0 < int(length) <= 4096:
+                self.reply(413,{"ok":False,"error":"Invalid body size"});return
         try:
-            obj=json.loads(self.rfile.read(int(length)))
-            if not isinstance(obj,dict):raise ValueError("JSON object required")
-            value=(self.server.prepare(obj) if path=="/api/prepare"
-                   else self.server.apply(obj))
-            self.reply(200,value)
+            doc=json.loads(self.rfile.read(int(length)))
+            if not isinstance(doc,dict):raise ValueError("JSON object required")
+            if path=="/api/shortcuts":
+                if set(doc)!={"items"}:raise ValueError("Invalid shortcut save")
+                self.server.shortcuts.save(doc["items"])
+                result={"ok":True,"items":self.server.shortcuts.list()}
+            elif path=="/api/quick":
+                result=self.server.quick(doc)
+            elif path=="/api/prepare":
+                result=self.server.prepare(doc)
+            else:
+                result=self.server.apply(doc)
+            self.reply(200,result)
         except PermissionError:
             self.reply(403,{"ok":False,"error":"Write disabled"})
         except (ValueError,OverflowError,OSError):
@@ -487,13 +567,16 @@ def main() -> None:
     parser.add_argument("--device-port",type=int,default=4370)
     parser.add_argument("--cert",required=True,help="Local TLS certificate PEM")
     parser.add_argument("--key",required=True,help="Local TLS private key PEM")
+    parser.add_argument("--enable-pairing",action="store_true",
+                        help="Show one-time phone pairing code for 5 minutes")
     parser.add_argument("--enable-write",action="store_true",
                         help="Explicitly permit live SET_TIME after authenticated confirmation")
     args=parser.parse_args()
     password=secrets.token_urlsafe(22)
     gateway=Gateway((args.bind,args.port),device_host=args.device_host,
                     device_port=args.device_port,password=password,
-                    enable_write=args.enable_write)
+                    enable_write=args.enable_write,
+                    allow_pairing=args.enable_pairing)
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version=ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=args.cert,keyfile=args.key)
@@ -502,7 +585,10 @@ def main() -> None:
     print("Mode:", "LIVE CLOCK WRITES ENABLED" if args.enable_write
           else "READ ONLY",flush=True)
     print(f"URL: https://{args.bind}:{args.port}/",flush=True)
-    print("Login user: operator")
+    if gateway.pairing.code:
+        print("PAIR THIS PHONE ONLY ONCE (valid 5 minutes):",gateway.pairing.code,
+              flush=True)
+    print("Login user (fallback): operator")
     print("Temporary password:",password,flush=True)
     print("Do not publish or share this password. Stop with Ctrl+C.",flush=True)
     try:
