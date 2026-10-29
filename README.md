@@ -1,8 +1,8 @@
 # ZKTeco Clock Control — M5StickC Plus
 
-**M2: EXPERIMENTAL, READ-ONLY + MOBILE DRY-RUN PREVIEW**
+**v1.0.0-rc1 — HTTPS release candidate · physical login and reboot verified · time writing pending field qualification**
 
-> The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
+> The owner has tested real M5StickC Plus HTTPS, iPhone trust/login and session persistence across power cycle. The hardware's ZKTeco `SET_TIME` command has **not yet been verified** in this conversation. Default firmware is READ ONLY; enable `m5stickc-plus-secure-write-lab` only after a controlled protocol read/write qualification. See [v1 release notes](docs/RELEASE_V1_RC1.md).
 
 ## M9 — M5 HTTPS and renewable trusted iPhone sessions (draft)
 
