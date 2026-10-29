@@ -48,6 +48,9 @@ class M7UiContracts(unittest.TestCase):
         self.assertNotIn("esp_deep_sleep",IDLE)
         self.assertIn("if (screenIdle.sleeping())",SRC)
         self.assertIn("screenIdle.touch()",SRC)
+        self.assertIn("wakeBlockUntilRelease = true",SRC)
+        self.assertIn("if (wakeBlockUntilRelease)",SRC)
+        self.assertIn("!M5.BtnA.isPressed() && !M5.BtnB.isPressed()",SRC)
         self.assertIn("if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded()",SRC)
         self.assertIn("server.handleClient()",SRC)
 
