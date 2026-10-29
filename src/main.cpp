@@ -212,55 +212,168 @@ bool readDeviceClock(String &clock, String &error, uint32_t &durationMs) {
 const char PAGE[] PROGMEM = R"HTML(
 <!doctype html><html lang="ar" dir="rtl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ZKTeco Clock — Read Only</title>
+<meta name="color-scheme" content="dark">
+<title>ZKTeco Clock — M2 Preview</title>
 <style>
-body{margin:0;background:#101c2a;color:#eff6ff;font:16px system-ui,Tahoma,Arial}
-main{max-width:440px;margin:36px auto;padding:18px}
-section{background:#1b2b3d;border-radius:16px;padding:20px;margin:14px 0}
-h1{font-size:22px} .time{font-size:29px;font-variant-numeric:tabular-nums;font-weight:700}
-small{color:#aebfce} button{width:100%;padding:16px;background:#3977dc;color:white;
-border:0;border-radius:12px;font-size:17px;font-weight:700}
-.warn{color:#ffd288} .ok{color:#a4e5be}
+:root{color-scheme:dark;font-family:system-ui,Tahoma,Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:#0c1725;color:#edf5ff}
+main{max-width:540px;margin:18px auto;padding:16px}
+h1{font-size:23px;margin:6px 0}
+header p{margin:7px 0 16px;color:#b6c8dc;line-height:1.6}
+.card{background:#17283c;border:1px solid #294158;border-radius:15px;padding:17px;margin:13px 0}
+.eyebrow{font-size:12px;color:#aac3dc}
+.time{font-size:28px;direction:ltr;text-align:right;font-variant-numeric:tabular-nums;font-weight:750;line-height:1.6}
+.small{font-size:13px;color:#adc3d8;line-height:1.65}
+strong{font-size:18px}button,input{font:inherit}
+button{border:0;border-radius:11px;padding:13px 15px;background:#2876cf;color:white;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.primary{width:100%;font-size:17px}
+.mode{display:flex;gap:8px;margin-bottom:12px}
+.mode button{flex:1;background:#30465c}
+.mode button.selected{background:#2876cf}
+input{display:block;width:100%;padding:13px;border:1px solid #51708c;border-radius:9px;background:#0e1c2c;color:#fff;direction:ltr}
+label{display:block;font-size:13px;margin:12px 0 6px}
+.ok{color:#89efbd}.warn{color:#ffce82}.muted{color:#b6c8dc}
+hr{border:0;border-top:1px solid #324860;margin:16px 0}
+.note{background:#302b22;border-right:3px solid #ebb85e;padding:12px;line-height:1.7;border-radius:5px}
 </style></head><body><main>
-<h1>ساعة البصمة — فحص فقط</h1>
-<p>هذه النسخة تقرأ الوقت ولا تحتوي أمر تعديل أو مزامنة.</p>
-<section><small>ساعة ZKTeco</small><div class="time" id="device">—</div></section>
-<section><small>ساعة الموبايل (بغداد)</small><div class="time" id="phone">—</div>
-<small>الموبايل هو مصدر العرض فقط؛ تأكد أن ساعته مضبوطة.</small></section>
-<section><small>فرق التوقيت التقريبي</small><div class="time" id="delta">—</div>
-<p id="message"></p></section>
-<button id="read">قراءة ساعة الجهاز</button>
-<p><small>الاتصال محلي — لا بيانات موظفين، لا رفع سحابي، لا تعديل للسجلات.</small></p>
+<header><div class="eyebrow">ZKTeco iFace 950 • M5StickC Plus</div>
+<h1>التحكم بساعة البصمة</h1>
+<p>نسخة M2 تجريبية: قراءة حقيقية ومعاينة التصحيح فقط. <b>لا تحتوي أي أمر لتغيير الساعة.</b></p>
+</header>
+<div class="card">
+<div class="eyebrow">ساعة جهاز البصمة • بغداد</div><div class="time" id="device">—</div>
+<div class="eyebrow">ساعة الموبايل • بغداد</div><div class="time" id="phone">—</div>
+<hr><div class="eyebrow">فرق الجهاز عن الهاتف (تقريبي)</div>
+<div class="time" id="delta">—</div><p class="small" id="status">اضغط «قراءة» أولاً.</p>
+<button class="primary" id="read" type="button">قراءة ساعة الجهاز</button>
+</div>
+<div class="card">
+<h2 style="font-size:18px">معاينة تغيير الوقت</h2>
+<div class="mode">
+<button type="button" id="phoneMode" class="selected">مزامنة الهاتف</button>
+<button type="button" id="manualMode">إدخال يدوي</button>
+</div>
+<div id="manualBox" hidden>
+<label for="manual">التاريخ والوقت المطلوبان (توقيت بغداد)</label>
+<input id="manual" type="datetime-local" step="1" min="2000-01-01T00:00:00" max="2099-12-31T23:59:59">
+</div>
+<p class="small" id="sourceHint">نستخدم ساعة الهاتف لحظة الضغط على المعاينة، وليس وقت فتح الصفحة.</p>
+<button id="preview" class="primary" type="button">معاينة التصحيح</button>
+<div id="previewResult" hidden>
+<hr>
+<div class="eyebrow">التوقيت المقترح</div><div class="time" id="proposed">—</div>
+<div class="eyebrow">فرق التصحيح المطلوب</div>
+<strong id="shift">—</strong>
+<p class="note" id="warning"></p>
+</div>
+</div>
+<p class="small">⚠️ هذه نسخة DRY RUN: لا يوجد زر تطبيق، ولا API لضبط الساعة. تصحيح الوقت للخلف والأمام سيكون متاحاً بعد اختبار الجهاز وحماية عملية التنفيذ. تحقق من ساعة الهاتف؛ قد تكون خاطئة.</p>
 </main><script>
-let lastDeviceTime = null;
-function refreshPhone(){
- const now = new Date();
- document.getElementById('phone').textContent = new Intl.DateTimeFormat('en-GB',{
-   timeZone:'Asia/Baghdad',hour:'2-digit',minute:'2-digit',second:'2-digit',
-   hour12:false}).format(now);
- if(lastDeviceTime){
-   const offset = (lastDeviceTime.getTime()-now.getTime())/1000;
-   document.getElementById('delta').textContent =
-       (offset >= 0 ? '+' : '') + offset.toFixed(1) + ' ثانية';
- }
-}
-setInterval(refreshPhone,1000);refreshPhone();
-document.getElementById('read').addEventListener('click',async()=>{
- const button=document.getElementById('read');
- const message=document.getElementById('message');
- button.disabled=true;message.textContent='جاري القراءة...';
- try{
-  const response=await fetch('/api/read',{cache:'no-store'});
-  const result=await response.json();
-  if(!response.ok||!result.ok) throw new Error(result.error||'Connection failed');
-  document.getElementById('device').textContent=result.device_time.replace('T',' ');
-  lastDeviceTime=new Date(result.device_time+'+03:00');
-  message.className='ok';
-  message.textContent='قراءة ناجحة. زمن الاتصال: '+result.duration_ms+' مللي ثانية. الفرق تقريبي.';
-  refreshPhone();
- }catch(e){ message.className='warn';message.textContent='فشل الاتصال: '+e.message; }
- finally{button.disabled=false;}
+'use strict';
+const $=id=>document.getElementById(id);
+let mode='phone', measuredOffsetMs=null, measuredAtMs=0;
+const formatter=new Intl.DateTimeFormat('en-GB',{
+  timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit',
+  hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
 });
+function baghdadParts(epoch){
+  const parts=formatter.formatToParts(new Date(epoch));
+  const v={}; for(const p of parts)if(p.type!=='literal')v[p.type]=p.value;
+  return v.year+'-'+v.month+'-'+v.day+' '+v.hour+':'+v.minute+':'+v.second;
+}
+function formatDiff(ms){
+  const sign=ms<0?'−':'+';
+  let s=Math.round(Math.abs(ms)/1000);
+  const d=Math.floor(s/86400);s%=86400;
+  const h=Math.floor(s/3600);s%=3600;
+  const m=Math.floor(s/60);s%=60;
+  return sign+(d?d+' يوم ':'')+(h?h+' ساعة ':'')+(m?m+' دقيقة ':'')+s+' ثانية';
+}
+function parseBaghdadManual(value){
+  const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if(!m)throw Error('أدخل التاريخ والساعة بشكل صحيح');
+  const y=+m[1],month=+m[2],d=+m[3],h=+m[4],min=+m[5],s=+(m[6]||'0');
+  if(y<2000||y>2099||month<1||month>12||d<1||d>31||h>23||min>59||s>59)
+    throw Error('التاريخ خارج النطاق المسموح');
+  // Iraq is +03:00 throughout the supported 2000-2099 range used in this device.
+  const utc=Date.UTC(y,month-1,d,h-3,min,s);
+  const verify=new Date(utc+3*3600*1000);
+  if(verify.getUTCFullYear()!==y||verify.getUTCMonth()+1!==month||
+     verify.getUTCDate()!==d||verify.getUTCHours()!==h||
+     verify.getUTCMinutes()!==min||verify.getUTCSeconds()!==s)
+    throw Error('هذا التاريخ غير موجود');
+  return utc;
+}
+function fresh(){return measuredOffsetMs!==null && (Date.now()-measuredAtMs)<60000;}
+function render(){
+  const now=Date.now();
+  $('phone').textContent=baghdadParts(now);
+  if(measuredOffsetMs!==null){
+    $('device').textContent=baghdadParts(now+measuredOffsetMs);
+    $('delta').textContent=formatDiff(measuredOffsetMs);
+    if(!fresh())$('status').textContent='القراءة قديمة؛ أعد القراءة قبل المعاينة.';
+  }
+}
+function setMode(next){
+  mode=next;
+  $('phoneMode').classList.toggle('selected',mode==='phone');
+  $('manualMode').classList.toggle('selected',mode==='manual');
+  $('manualBox').hidden=mode!=='manual';
+  $('sourceHint').textContent=mode==='phone'
+    ? 'نستخدم ساعة الهاتف لحظة الضغط على المعاينة، بتوقيت بغداد.'
+    : 'أدخل التاريخ والوقت المحليين لبغداد، بالثواني إن رغبت.';
+  $('previewResult').hidden=true;
+}
+$('phoneMode').onclick=()=>setMode('phone');
+$('manualMode').onclick=()=>setMode('manual');
+$('read').onclick=async()=>{
+  const button=$('read'),status=$('status');
+  button.disabled=true;status.textContent='جاري الاتصال...';
+  const start=Date.now();
+  try{
+    const response=await fetch('/api/read',{cache:'no-store'});
+    const end=Date.now();
+    const value=await response.json();
+    if(!response.ok||!value.ok)throw Error(value.error||'تعذر الاتصال');
+    const civil=value.device_time.replace('T','');
+    const epoch=parseBaghdadManual(civil.slice(0,10)+'T'+civil.slice(10));
+    measuredAtMs=Math.round((start+end)/2);
+    measuredOffsetMs=epoch-measuredAtMs;
+    status.className='small ok';
+    status.textContent='قراءة ناجحة، زمن الاستجابة '+(end-start)+' مللي ثانية. الفرق تقريبي.';
+    $('previewResult').hidden=true;
+    render();
+  }catch(e){
+    measuredOffsetMs=null;measuredAtMs=0;
+    $('device').textContent='—';$('delta').textContent='—';
+    status.className='small warn';status.textContent='فشل القراءة: '+e.message;
+  }finally{button.disabled=false;}
+};
+$('preview').onclick=()=>{
+  const out=$('previewResult'),warning=$('warning');
+  out.hidden=false;
+  try{
+    if(!fresh())throw Error('اقرأ ساعة البصمة من جديد قبل المعاينة');
+    const now=Date.now();
+    const proposed=mode==='phone'?now:parseBaghdadManual($('manual').value);
+    const shift=proposed-(now+measuredOffsetMs);
+    $('proposed').textContent=baghdadParts(proposed);
+    $('shift').textContent=formatDiff(shift);
+    warning.className='note';
+    warning.textContent=shift<0
+     ? 'تنبيه: هذا التصحيح يرجع ساعة البصمة للخلف، وقد تتداخل أوقات الحضور الجديدة مع القديمة. مسموح في النسخة النهائية بعد التأكيد.'
+     : 'هذا التصحيح يقدّم الساعة للأمام أو يبقيها قريبة من وقتها الحالي. المراجعة فقط، لا تغيير فعلي.';
+    if(Math.abs(shift)>24*3600*1000)
+      warning.textContent+=' انتبه: الفرق يتجاوز يوماً كاملاً، راجع التاريخ والمصدر.';
+  }catch(e){
+    $('proposed').textContent='—';$('shift').textContent='—';
+    warning.textContent=e.message;
+  }
+};
+setInterval(render,1000);
+render();
 </script></body></html>
 )HTML";
 
