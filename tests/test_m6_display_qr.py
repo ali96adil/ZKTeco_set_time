@@ -28,8 +28,9 @@ class SetupDisplayTests(unittest.TestCase):
         self.assertIn("net.apPassword.substring(mid)",SRC)
         self.assertNotIn("M5.Lcd.println(net.apPassword);",SRC)
 
-    def test_safe_default_and_boot_selection_remain(self):
-        self.assertIn("#define ZK_ENABLE_M5_TIME_WRITE 0",SRC)
+    def test_production_default_and_boot_selection_remain(self):
+        self.assertIn("default_envs = m5stickc-plus-production",PIO)
+        self.assertIn("ZK_ENABLE_M5_TIME_WRITE=1",PIO)
         self.assertIn("if (screenMode == ScreenMode::BOOT)",SRC)
         self.assertIn("if (M5.BtnA.wasPressed())",SRC)
         self.assertIn("screenMode = ScreenMode::CONNECT;",SRC)
