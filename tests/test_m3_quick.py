@@ -30,7 +30,7 @@ class QuickTests(unittest.TestCase):
                 reader=clock, setter=change)
             try:
                 gate.shortcuts.save([
-                    {"id":"morning","name":"Morning","kind":"time","value":"11:30:00"},
+                    {"id":"morning","name":"Morning","kind":"datetime","value":"2026-10-29T11:30:00"},
                     {"id":"sync","name":"Sync","kind":"phone","value":""}
                 ])
                 with patch("mac_live_control.time.sleep", return_value=None):
@@ -55,7 +55,7 @@ class QuickTests(unittest.TestCase):
                 setter=lambda t:writes.append(t))
             try:
                 gate.shortcuts.save([
-                    {"id":"old","name":"Old","kind":"date","value":"2020-01-01"}])
+                    {"id":"old","name":"Old","kind":"datetime","value":"2020-01-01T12:00:00"}])
                 with self.assertRaises(ValueError):
                     gate.quick({"id":"old","client_epoch_ms":0})
                 self.assertEqual(writes,[])
