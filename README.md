@@ -13,7 +13,7 @@
 - Bounded frame lengths, connection timeouts and validation of returned wall clock values.
 - No employee, attendance or biometric operations. **No `CMD_SET_TIME (202)`**.
 
-The separate project to enable **manual setting** and **phone-supplied time sync** will only be added after read-only qualification and safeguards. See [Architecture and Safety](docs/ARCHITECTURE_AND_SAFETY.md) and [Test Plan](docs/TEST_PLAN.md).
+The separate project to enable **manual setting** and **phone-supplied time sync**, including intentional **backward and forward clock adjustments**, will only be added after read-only qualification and safeguards. Backward changes will show an attendance timestamp-overlap warning, not an automatic prohibition. See [Architecture and Safety](docs/ARCHITECTURE_AND_SAFETY.md) and [Test Plan](docs/TEST_PLAN.md).
 
 ## Device/platform
 
