@@ -80,8 +80,8 @@ The sample config uses a non-routable documentation IP \`192.0.2.10\`. Replace i
 
 - [x] Source added to GitHub.
 - [x] Mobile JS syntax verified and seven UI behavior tests passed in an isolated JavaScript runtime.
-- [ ] GitHub Actions compile-and-test result confirmed (workflow configured, status not yet verified).
-- [ ] PlatformIO build confirmed on Mac or CI.
+- [x] GitHub Actions compile-and-test confirmed: [run 40851267969](https://github.com/ali96adil/ZKTeco_set_time/actions/runs/40851267969) (both firmware and static-ui jobs passed).
+- [x] PlatformIO firmware build passed in CI. Mac local compilation is optional for source review/upload.
 - [ ] Physical M5StickC Plus upload succeeds.
 - [ ] Direct read over target Wi-Fi works.
 - [ ] Write implementation (future milestone) independently tested.
