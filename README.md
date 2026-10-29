@@ -1,8 +1,19 @@
 # ZKTeco Clock Control — M5StickC Plus
 
-**v1.0.0-rc1 — HTTPS release candidate · physical login and reboot verified · time writing pending field qualification**
+**v1.0.0 — full-control production source · physical HTTPS/login verified · time writing needs field acceptance**
 
 > The owner has tested real M5StickC Plus HTTPS, iPhone trust/login and session persistence across power cycle. The hardware's ZKTeco `SET_TIME` command has **not yet been verified** in this conversation. Default firmware is READ ONLY; enable `m5stickc-plus-secure-write-lab` only after a controlled protocol read/write qualification. See [v1 release notes](docs/RELEASE_V1_RC1.md).
+
+## M10 — Complete HTTPS M5 production build
+
+**[Full production & setup guide](docs/V1_FULL_CONTROL_HTTPS_SETUP.md)**
+
+- **Default USB build:** `m5stickc-plus-production` — clock writing enabled on the M5's B button and on the authenticated iPhone HTTPS screen. Read-only remains optional for diagnostics, **not the normal release**.
+- **One HTTPS URL:** `https://zkclock.local` on both M5 modes. In A / SETUP, it opens `/setup` on the private WPA2 AP; in B / CONNECT, it opens the authenticated operator dashboard. If Bonjour fails in SETUP, use `https://192.168.4.1/setup` (TLS SAN covers this address).
+- **2-second write cooldown**, measured after the previous attempt completes. Independent SDK read after a clock-write and no automatic retry.
+- Physical B hold ~2.2 seconds; >24h correction requires longer confirmation. On the iPhone, every clock change requires confirmation, with an additional check for >24h.
+- The same existing locally trusted M5 certificate is used across both modes. **Never regenerate the certificate merely to upgrade Firmware.**
+- The M9 physical HTTPS/login/reboot tests succeeded; M10's real ZKTeco write and physical SETUP HTTPS still require a controlled acceptance test.
 
 ## M9 — M5 HTTPS and renewable trusted iPhone sessions (draft)
 
