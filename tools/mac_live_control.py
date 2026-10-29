@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 import secrets
 import ssl
 import threading
@@ -22,6 +23,8 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from mac_simulator import dashboard_html, parse_local_datetime
+from clock_presets import ShortcutStore, target_time
+from phone_pairing import PairingStore, get_cookie, cookie_header
 
 BAGHDAD = ZoneInfo("Asia/Baghdad")
 MAX_BODY = 512
@@ -85,7 +88,8 @@ class Gateway(ThreadingHTTPServer):
 
     def __init__(self, addr: tuple[str, int], *, device_host: str,
                  device_port: int, password: str, enable_write: bool,
-                 reader=None, setter=None):
+                 reader=None, setter=None, shortcut_path=None,
+                 pairing_path=None, allow_pairing=False):
         self.device_host = device_host
         self.device_port = device_port
         self.password = password
@@ -94,6 +98,12 @@ class Gateway(ThreadingHTTPServer):
         self.reader = reader or (lambda: read_real_clock(device_host, device_port))
         self.setter = setter or (lambda dt: set_real_clock_once(device_host, device_port, dt))
         self.lock = threading.RLock()
+        self.shortcuts = ShortcutStore(Path(shortcut_path or ".secrets/shortcuts.json"))
+        self.pairing = PairingStore(
+            Path(pairing_path or ".secrets/paired_phones.json"),
+            allow_new=allow_pairing,
+        )
+        self.last_quick = 0.0
         self.pending: PendingChange | None = None
         self.page = build_live_page(self.csrf_token, enable_write)
         super().__init__(addr, Handler)
@@ -214,6 +224,64 @@ class Gateway(ThreadingHTTPServer):
                 "requested_time": target.strftime("%Y-%m-%dT%H:%M:%S"),
                 "offset_seconds": int(round(drift)),
                 "checks": checks,
+                "write_error": write_error,
+            }
+
+
+    def quick(self, doc: dict) -> dict:
+        """One paired-phone action, one SDK command, one independent verification.
+
+        No repeated confirmation dialogues and no auto-retry on ambiguous ACK.
+        """
+        with self.lock:
+            if not self.enable_write:
+                raise PermissionError("Clock writes not enabled")
+            if not isinstance(doc, dict) or set(doc) != {"id", "client_epoch_ms"}:
+                raise ValueError("Invalid shortcut invocation")
+            now = time.monotonic()
+            if self.last_quick and now - self.last_quick < 8.0:
+                raise ValueError("Wait before another clock action")
+            self.last_quick = now
+            item = next((x for x in self.shortcuts.list()
+                         if x["id"] == doc["id"]), None)
+            if item is None:
+                raise ValueError("Unknown shortcut")
+            old = self.reader()
+            # The clicked phone epoch is an instant, not an offset cached at page load.
+            client_epoch = doc["client_epoch_ms"]
+            if item["kind"] == "phone":
+                proposed = baghdad_naive_from_epoch_ms(client_epoch)
+            else:
+                proposed = target_time(item, old, old)
+            delta = (proposed - old).total_seconds()
+            # Large shifts are dangerous to production attendance timelines.
+            # Use the existing manual prepare/confirm flow for >24h corrections.
+            if abs(delta) > 86400:
+                raise ValueError("Large time change requires manual confirmation")
+            before = time.monotonic()
+            write_error = None
+            try:
+                self.setter(proposed)
+            except Exception as exc:
+                write_error = type(exc).__name__
+            time.sleep(0.8)
+            try:
+                observed = self.reader()  # fresh connection, never same-session ACK
+                expected = proposed + timedelta(seconds=time.monotonic() - before)
+                error_seconds = round((observed - expected).total_seconds(), 2)
+                verified = write_error is None and abs(error_seconds) <= VERIFY_TOLERANCE
+                result_time = observed.strftime("%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                error_seconds = None
+                verified = False
+                result_time = None
+            print("QUICK_CLOCK_CHANGE id=%s delta_seconds=%d verified=%s write_error=%s" %
+                  (item["id"], int(round(delta)), verified, write_error), flush=True)
+            return {
+                "ok": True, "status": "VERIFIED" if verified else "UNVERIFIED",
+                "id": item["id"], "name": item["name"],
+                "requested_time": proposed.strftime("%Y-%m-%dT%H:%M:%S"),
+                "result_time": result_time, "error_seconds": error_seconds,
                 "write_error": write_error,
             }
 
