@@ -90,10 +90,11 @@ class Gateway(ThreadingHTTPServer):
     def __init__(self, addr: tuple[str, int], *, device_host: str,
                  device_port: int, password: str, enable_write: bool,
                  reader=None, setter=None, shortcut_path=None,
-                 pairing_path=None, allow_pairing=False):
+                 pairing_path=None, allow_pairing=False, allow_basic=True):
         self.device_host = device_host
         self.device_port = device_port
         self.password = password
+        self.allow_basic = allow_basic
         self.csrf_token = secrets.token_urlsafe(32)
         self.enable_write = enable_write
         self.reader = reader or (lambda: read_real_clock(device_host, device_port))
@@ -410,6 +411,8 @@ class Handler(BaseHTTPRequestHandler):
         cookie = get_cookie(self.headers.get("Cookie", ""))
         if self.server.pairing.authorized(cookie):
             return True
+        if not self.server.allow_basic:
+            return False
         if not authorization.startswith("Basic "):
             return False
         try:
@@ -567,6 +570,8 @@ def main() -> None:
     parser.add_argument("--device-port",type=int,default=4370)
     parser.add_argument("--cert",required=True,help="Local TLS certificate PEM")
     parser.add_argument("--key",required=True,help="Local TLS private key PEM")
+    parser.add_argument("--paired-only",action="store_true",
+                        help="Disable rotating Basic password; trust paired Safari only")
     parser.add_argument("--enable-pairing",action="store_true",
                         help="Show one-time phone pairing code for 5 minutes")
     parser.add_argument("--enable-write",action="store_true",
@@ -576,7 +581,8 @@ def main() -> None:
     gateway=Gateway((args.bind,args.port),device_host=args.device_host,
                     device_port=args.device_port,password=password,
                     enable_write=args.enable_write,
-                    allow_pairing=args.enable_pairing)
+                    allow_pairing=args.enable_pairing,
+                    allow_basic=not args.paired_only)
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version=ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=args.cert,keyfile=args.key)
@@ -588,8 +594,11 @@ def main() -> None:
     if gateway.pairing.code:
         print("PAIR THIS PHONE ONLY ONCE (valid 5 minutes):",gateway.pairing.code,
               flush=True)
-    print("Login user (fallback): operator")
-    print("Temporary password:",password,flush=True)
+    if args.paired_only:
+        print("AUTH: paired iPhone sessions only; no rotating login password.")
+    else:
+        print("Login user (fallback): operator")
+        print("Temporary password:",password,flush=True)
     print("Do not publish or share this password. Stop with Ctrl+C.",flush=True)
     try:
         gateway.serve_forever(poll_interval=0.1)
