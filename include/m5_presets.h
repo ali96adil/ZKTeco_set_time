@@ -4,7 +4,7 @@
 // It does not expose a remote write endpoint to the campus Wi-Fi.
 #include <Arduino.h>
 #include <Preferences.h>
-#include <WebServer.h>
+#include <ESPWebServer.hpp>
 #include "network_setup.h"
 #include "web_navigation.h"
 
