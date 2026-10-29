@@ -496,8 +496,11 @@ void drawSetupPassword() {
   M5.Lcd.drawString("PASSWORD - FIRST / LAST",8,64,1);
   M5.Lcd.setTextColor(WHITE,BLACK);
   const int mid = net.apPassword.length()/2;
-  M5.Lcd.drawString(net.apPassword.substring(0,mid),8,79,4);
-  M5.Lcd.drawString(net.apPassword.substring(mid),126,79,4);
+  // Fixed-width and scaled: seven characters fit reliably in each half.
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.drawString(net.apPassword.substring(0,mid),8,79,2);
+  M5.Lcd.drawString(net.apPassword.substring(mid),126,79,2);
+  M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(0xBDF7,BLACK);
   M5.Lcd.drawString("type both parts without space",8,109,1);
   M5.Lcd.drawString("A: QR    192.168.4.1",8,123,1);
