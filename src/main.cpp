@@ -13,6 +13,8 @@
 #include "network_setup.h"
 #include "m5_presets.h"
 #include "m5_rtc.h"
+#include "screen_idle.h"
+#include "web_navigation.h"
 #ifndef ZK_ENABLE_M5_TIME_WRITE
 #define ZK_ENABLE_M5_TIME_WRITE 0
 #endif
@@ -29,6 +31,7 @@ WebServer server(80);
 NetworkSetup net;
 M5Presets stored;
 M5Clock rtcClock;
+ScreenIdle screenIdle;
 enum class ScreenMode { BOOT, SETUP, CONNECT };
 ScreenMode screenMode = ScreenMode::BOOT;
 uint8_t selectedPreset = 0;
@@ -305,6 +308,12 @@ hr{border:0;border-top:1px solid #324860;margin:16px 0}
 <h1>التحكم بساعة البصمة</h1>
 <p>نسخة M2 تجريبية: قراءة حقيقية ومعاينة التصحيح فقط. <b>لا تحتوي أي أمر لتغيير الساعة.</b></p>
 </header>
+<nav style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 15px">
+<a href="/" style="padding:10px;background:#24517b;color:white;border-radius:8px">الرئيسية</a>
+<a href="/presets" style="padding:10px;background:#24517b;color:white;border-radius:8px">الاختصارات</a>
+<a href="/setup" style="padding:10px;background:#24517b;color:white;border-radius:8px">إعدادات الشبكة</a>
+<a href="/rtc" style="padding:10px;background:#24517b;color:white;border-radius:8px">الساعة RTC</a>
+</nav>
 <div class="card">
 <div class="eyebrow">ساعة جهاز البصمة • بغداد</div><div class="time" id="device">—</div>
 <div class="eyebrow">ساعة الموبايل • بغداد</div><div class="time" id="phone">—</div>
@@ -331,6 +340,13 @@ hr{border:0;border-top:1px solid #324860;margin:16px 0}
 <strong id="shift">—</strong>
 <p class="note" id="warning"></p>
 </div>
+</div>
+<div class="card">
+<h2 style="font-size:18px">الاختصارات الموجودة على M5</h2>
+<p class="small">قائمة عرض فقط. لتنفيذ الأوامر استخدم أزرار الجهاز؛
+نسخة READ ONLY لا تغيّر ساعة البصمة.</p>
+<div id="m5Shortcuts">جاري قراءة الأوامر...</div>
+<a href="/presets" style="color:#9bd3ff">عرض وإدارة كل الاختصارات</a>
 </div>
 <p class="small">⚠️ هذه نسخة DRY RUN: لا يوجد زر تطبيق، ولا API لضبط الساعة. تصحيح الوقت للخلف والأمام سيكون متاحاً بعد اختبار الجهاز وحماية عملية التنفيذ. تحقق من ساعة الهاتف؛ قد تكون خاطئة.</p>
 </main><script>
@@ -441,7 +457,31 @@ $('preview').onclick=()=>{
     warning.textContent=e.message;
   }
 };
+async function showM5Shortcuts(){
+  const el=document.getElementById('m5Shortcuts');
+  try {
+    const r=await fetch('/api/presets',{cache:'no-store'});
+    if(!r.ok)throw Error('API unavailable');
+    const payload=await r.json();
+    el.replaceChildren();
+    const items=payload.items||[];
+    if(!items.length) {
+      const note=document.createElement('p');
+      note.textContent='لا توجد أوامر محفوظة. أضفها من وضع SETUP.';
+      el.append(note);
+    }
+    for(const p of items) {
+      const line=document.createElement('p');
+      line.textContent=p.name+' — '+p.datetime.replace('T',' ');
+      el.append(line);
+    }
+    const rtc=document.createElement('p');
+    rtc.textContent='مزامنة ساعة M5: '+(payload.rtc_ready?'جاهزة':'تحتاج معايرة');
+    el.append(rtc);
+  }catch(ex){el.textContent='تعذر قراءة الاختصارات: '+ex.message;}
+}
 setInterval(render,1000);
+showM5Shortcuts();
 render();
 </script></body></html>
 )HTML";
@@ -548,9 +588,23 @@ void drawScreen() {
 
 void startHttpOnce() {
   if (serverStarted) return;
-  net.attachRoutes(server);
+  net.attachRoutes(server, screenIdle);
   stored.routes(server, net);
   rtcClock.routes(server, net);
+  server.on("/api/presets", HTTP_GET, []() {
+    stored.load();
+    zkwire::CivilTime checkedRtc;
+    String json = "{\"ok\":true,\"rtc_ready\":" +
+      String(rtcClock.trustworthy(checkedRtc) ? "true" : "false") + ",\"items\":[";
+    for (uint8_t i=0; i<stored.count; ++i) {
+      if (i) json += ",";
+      json += "{\"name\":\"" + zkJsonEscape(stored.items[i].name) +
+        "\",\"datetime\":\"" + zkJsonEscape(stored.items[i].datetime) + "\"}";
+    }
+    json += "]}";
+    server.sendHeader("Cache-Control","no-store");
+    server.send(200, "application/json; charset=utf-8",json);
+  });
   server.on("/manifest.webmanifest", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
     server.send(200,"application/manifest+json",
@@ -641,6 +695,7 @@ void setup() {
   net.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD, ZK_DEVICE_IP);
   stored.load();
   rtcClock.begin();
+  screenIdle.begin();
   // No network write to attendance device on startup.
   connectWifiIfNeeded();
   drawScreen();
@@ -648,6 +703,26 @@ void setup() {
 
 void loop() {
   M5.update();
+  // First press only wakes the backlight; it must NEVER trigger a clock
+  // adjustment on the same press/hold used to wake the screen.
+  if (screenIdle.sleeping()) {
+    if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+      screenIdle.touch();
+      drawScreen();
+    }
+    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
+      server.handleClient();
+    delay(15);
+    return;
+  }
+  screenIdle.update();
+  if (screenIdle.sleeping()) {
+    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
+      server.handleClient();
+    delay(15);
+    return;
+  }
+  if (M5.BtnA.isPressed() || M5.BtnB.isPressed()) screenIdle.touch();
   if (screenMode == ScreenMode::BOOT) {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
