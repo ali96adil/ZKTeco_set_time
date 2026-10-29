@@ -7,6 +7,7 @@
 #include <esp_system.h>
 #include <mbedtls/sha256.h>
 #include <cstring>
+#include <cctype>
 
 class ZkSessions {
   static constexpr unsigned kSlots = 4;
@@ -48,7 +49,10 @@ class ZkSessions {
   static String passwordDigest(const String& salt,const String& pass) {
     // Salted slow hash; do not persist or log the plaintext password.
     String current=hash(salt+":"+pass);
-    for(unsigned i=0;i<kRounds;++i) current=hash(current+salt);
+    for(unsigned i=0;i<kRounds;++i) {
+      current=hash(current+salt);
+      if((i&127)==0) delay(0); // yield to ESP32 watchdog during slow hashing
+    }
     return current;
   }
   void load() {
