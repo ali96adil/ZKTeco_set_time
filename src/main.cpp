@@ -283,6 +283,11 @@ function baghdadParts(epoch){
   const v={}; for(const p of parts)if(p.type!=='literal')v[p.type]=p.value;
   return v.year+'-'+v.month+'-'+v.day+' '+v.hour+':'+v.minute+':'+v.second;
 }
+function formatCivil(epoch){
+  // ZKTeco stores wall-clock fields (no timezone). Keep the displayed civil
+  // date stable even for dates when Baghdad historically observed DST.
+  return new Date(epoch+3*3600*1000).toISOString().slice(0,19).replace('T',' ');
+}
 function formatDiff(ms){
   const sign=ms<0?'−':'+';
   let s=Math.round(Math.abs(ms)/1000);
@@ -297,7 +302,8 @@ function parseBaghdadManual(value){
   const y=+m[1],month=+m[2],d=+m[3],h=+m[4],min=+m[5],s=+(m[6]||'0');
   if(y<2000||y>2099||month<1||month>12||d<1||d>31||h>23||min>59||s>59)
     throw Error('التاريخ خارج النطاق المسموح');
-  // Iraq is +03:00 throughout the supported 2000-2099 range used in this device.
+  // Synthetic fixed +03:00 is used only to compare ZKTeco wall-clock fields.
+  // It is NOT a historical Baghdad UTC conversion before 2008.
   const utc=Date.UTC(y,month-1,d,h-3,min,s);
   const verify=new Date(utc+3*3600*1000);
   if(verify.getUTCFullYear()!==y||verify.getUTCMonth()+1!==month||
@@ -311,7 +317,7 @@ function render(){
   const now=Date.now();
   $('phone').textContent=baghdadParts(now);
   if(measuredOffsetMs!==null){
-    $('device').textContent=baghdadParts(now+measuredOffsetMs);
+    $('device').textContent=formatCivil(now+measuredOffsetMs);
     $('delta').textContent=formatDiff(measuredOffsetMs);
     if(!fresh())$('status').textContent='القراءة قديمة؛ أعد القراءة قبل المعاينة.';
   }
@@ -359,7 +365,7 @@ $('preview').onclick=()=>{
     const now=Date.now();
     const proposed=mode==='phone'?now:parseBaghdadManual($('manual').value);
     const shift=proposed-(now+measuredOffsetMs);
-    $('proposed').textContent=baghdadParts(proposed);
+    $('proposed').textContent=mode==='manual'?formatCivil(proposed):baghdadParts(proposed);
     $('shift').textContent=formatDiff(shift);
     warning.className='note';
     warning.textContent=shift<0
