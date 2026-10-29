@@ -69,6 +69,30 @@ inline bool makeReadOnlyFrame(uint16_t command, uint16_t session,
   return true;
 }
 
+
+// Separate, explicitly named SET_TIME encoder for physically authorized
+// M5 Button B actions only. This is NEVER routed through HTTP.
+// The firmware build flag defaults to disabling real M5 time writes.
+inline bool makeSetTimeFrame(uint16_t session, uint16_t priorReplyId,
+                             const uint8_t clock[4], uint8_t out[20]) {
+  if (!clock || !out) return false;
+  uint8_t zk[12] = {};
+  put16(zk, 202); // CMD_SET_TIME
+  put16(zk + 4, session);
+  put16(zk + 6, priorReplyId);
+  memcpy(zk + 8, clock, 4);
+  put16(zk + 2, checksum(zk, sizeof(zk)));
+  uint32_t nextId = uint32_t(priorReplyId) + 1u;
+  if (nextId >= 65535u) nextId -= 65535u;
+  put16(zk + 6, uint16_t(nextId));
+  memset(out, 0, 20);
+  put16(out, kMagic1);
+  put16(out + 2, kMagic2);
+  put32(out + 4, sizeof(zk));
+  memcpy(out + 8, zk, sizeof(zk));
+  return true;
+}
+
 inline bool getTcpBodyLength(const uint8_t header[8], uint32_t& length) {
   if (!header || le16(header) != kMagic1 || le16(header + 2) != kMagic2) return false;
   length = le32(header + 4);
@@ -123,4 +147,35 @@ inline bool decodeTime(const uint8_t bytes[4], CivilTime& out) {
   out = t;
   return true;
 }
+
+inline bool encodeTime(const CivilTime& t, uint8_t output[4]) {
+  if (!output || t.year < 2000 || t.year > 2099 ||
+      t.month < 1 || t.month > 12 || t.day < 1 || t.day > 31 ||
+      t.hour > 23 || t.minute > 59 || t.second > 59) return false;
+  static const uint8_t days[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+  bool leap = t.year % 4 == 0 && (t.year % 100 != 0 || t.year % 400 == 0);
+  const uint8_t maxD = t.month == 2 && leap ? 29 : days[t.month - 1];
+  if (t.day > maxD) return false;
+  uint32_t v = (((uint32_t(t.year - 2000) * 12 + (t.month - 1)) * 31 +
+                (t.day - 1)) * 86400)
+                + (uint32_t(t.hour)*3600) + (t.minute*60) + t.second;
+  put32(output, v);
+  return true;
+}
+
+// Proleptic Gregorian seconds, for difference/confirmation (not ZK encoding).
+inline int64_t civilSeconds(const CivilTime& t) {
+  static const uint8_t days[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+  int64_t total = 0;
+  for (uint16_t y=2000; y<t.year; ++y)
+    total += ((y%4==0 && (y%100!=0 || y%400==0)) ? 366 : 365) * 86400LL;
+  for (uint8_t m=1; m<t.month; ++m) {
+    total += days[m-1]*86400LL;
+    if (m == 2 && t.year%4==0 && (t.year%100!=0 || t.year%400==0))
+      total += 86400LL;
+  }
+  total += (t.day-1)*86400LL + t.hour*3600LL + t.minute*60LL + t.second;
+  return total;
+}
+
 } // namespace zkwire

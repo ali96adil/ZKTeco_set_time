@@ -9,6 +9,10 @@
 #include "config.h"
 #include "zk_wire.h"
 #include "network_setup.h"
+#include "m5_presets.h"
+#ifndef ZK_ENABLE_M5_TIME_WRITE
+#define ZK_ENABLE_M5_TIME_WRITE 0
+#endif
 
 namespace {
 constexpr uint16_t CMD_CONNECT = zkwire::kConnect;
@@ -20,7 +24,14 @@ constexpr size_t MAX_PACKET_BODY = zkwire::kMaxBody;
 constexpr uint32_t TIMEOUT_MS = 5000;
 WebServer server(80);
 NetworkSetup net;
+M5Presets stored;
+enum class ScreenMode { BOOT, SETUP, CONNECT };
+ScreenMode screenMode = ScreenMode::BOOT;
+uint8_t selectedPreset = 0;
 bool buttonBLatched = false;
+bool longShiftHold = false;
+bool buttonALatched = false;
+bool commandBusy = false;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
@@ -139,6 +150,110 @@ bool readDeviceClock(String &clock, String &error, uint32_t &durationMs) {
   client.stop();
   durationMs = millis() - started;
   return success;
+}
+
+
+bool parseCivil(const String& str, zkwire::CivilTime& t) {
+  if (!M5Presets::validDateTime(str)) return false;
+  t.year = str.substring(0,4).toInt();
+  t.month = str.substring(5,7).toInt();
+  t.day = str.substring(8,10).toInt();
+  t.hour = str.substring(11,13).toInt();
+  t.minute = str.substring(14,16).toInt();
+  t.second = str.substring(17,19).toInt();
+  return true;
+}
+
+enum class RunResult { COMPLETED, NEED_LONG_HOLD, FAILED };
+
+RunResult executeSelected(bool allowLargeShift) {
+  if (screenMode != ScreenMode::CONNECT || commandBusy) return RunResult::FAILED;
+  if (WiFi.status() != WL_CONNECTED) {
+    statusLine = "NO WIFI / ZK UNREACHABLE";
+    return RunResult::FAILED;
+  }
+  stored.load();
+  if (selectedPreset >= stored.count) return RunResult::FAILED;
+  zkwire::CivilTime target;
+  if (!parseCivil(stored.items[selectedPreset].datetime, target)) {
+    statusLine = "INVALID PRESET";
+    return RunResult::FAILED;
+  }
+  String current, error;
+  uint32_t readingMs = 0;
+  if (!readDeviceClock(current, error, readingMs)) {
+    statusLine = "READ ERROR: " + error;
+    return RunResult::FAILED;
+  }
+  zkwire::CivilTime before;
+  if (!parseCivil(current, before)) {
+    statusLine = "BAD DEVICE TIME";
+    return RunResult::FAILED;
+  }
+  int64_t delta = zkwire::civilSeconds(target) - zkwire::civilSeconds(before);
+  if ((delta > 86400LL || delta < -86400LL) && !allowLargeShift) {
+    statusLine = "LARGE SHIFT: HOLD B 4s";
+    return RunResult::NEED_LONG_HOLD;
+  }
+#if ZK_ENABLE_M5_TIME_WRITE
+  // ONLY the physical B-button path can reach this function. There is no
+  // HTTP write API. One send, fresh independent SDK read to verify, no retries.
+  commandBusy = true;
+  uint8_t encoded[4];
+  if (!zkwire::encodeTime(target, encoded)) {
+    statusLine = "CLOCK ENCODE FAILED";
+    commandBusy = false;
+    return RunResult::FAILED;
+  }
+  IPAddress ip;
+  if (!ip.fromString(net.zkIp)) {
+    statusLine = "TARGET IP INVALID";
+    commandBusy = false;
+    return RunResult::FAILED;
+  }
+  WiFiClient client;
+  client.setTimeout(TIMEOUT_MS);
+  bool acknowledged = false;
+  uint32_t sentAt = 0;
+  do {
+    if (!client.connect(ip, ZK_DEVICE_PORT, TIMEOUT_MS)) break;
+    Reply reply;
+    String receiveError;
+    if (!sendCommand(client, CMD_CONNECT, 0, 65534) ||
+        !receiveReply(client, reply, receiveError) || reply.code != CMD_ACK_OK)
+      break;
+    const uint16_t session = reply.session;
+    uint8_t frame[20] = {};
+    if (!zkwire::makeSetTimeFrame(session, reply.replyId, encoded, frame))
+      break;
+    sentAt = millis();
+    if (client.write(frame, sizeof(frame)) != sizeof(frame) ||
+        !receiveReply(client, reply, receiveError) ||
+        reply.code != CMD_ACK_OK || reply.session != session) break;
+    acknowledged = true;
+    sendCommand(client, CMD_EXIT, session, reply.replyId);
+  } while (false);
+  client.stop();
+
+  delay(800);
+  String confirmed, verifyError;
+  uint32_t verifyMs = 0;
+  const bool readOk = readDeviceClock(confirmed, verifyError, verifyMs);
+  zkwire::CivilTime observed;
+  bool valid = readOk && parseCivil(confirmed, observed);
+  int64_t expectedSeconds = zkwire::civilSeconds(target) +
+                             ((millis() - sentAt) / 1000);
+  bool verified = acknowledged && valid &&
+    llabs(zkwire::civilSeconds(observed) - expectedSeconds) <= 2;
+  statusLine = verified ? "CLOCK VERIFIED" : "UNVERIFIED: CHECK ZKTeco";
+  Serial.println(statusLine);
+  commandBusy = false;
+  return verified ? RunResult::COMPLETED : RunResult::FAILED;
+#else
+  statusLine = "WRITE LAB DISABLED";
+  Serial.println("M5 write disabled for physical qualification build");
+  return RunResult::FAILED;
+#endif
 }
 
 const char PAGE[] PROGMEM = R"HTML(
@@ -317,32 +432,54 @@ render();
 
 void drawScreen() {
   M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(5, 4);
+  M5.Lcd.setCursor(4, 4);
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setTextSize(2);
-  M5.Lcd.println("ZKTeco clock");
+  M5.Lcd.println("ZKTeco Clock");
   M5.Lcd.setTextSize(1);
-  if (net.apOn) {
-    M5.Lcd.println("WPA2 SETUP AP");
-    M5.Lcd.println(net.apSsid);
-    M5.Lcd.println("Password: " + net.apPassword);
-    M5.Lcd.println("http://192.168.4.1/setup");
-    M5.Lcd.println("Hold B to close AP");
-    if (WiFi.status() == WL_CONNECTED)
-      M5.Lcd.println("STA " + WiFi.localIP().toString());
-  } else {
-    M5.Lcd.println("M3 READ ONLY");
-    M5.Lcd.println(statusLine);
-    if (WiFi.status() == WL_CONNECTED)
-      M5.Lcd.println("http://" + WiFi.localIP().toString());
-    M5.Lcd.println(lastClock);
-    M5.Lcd.println("A: read / B hold: setup");
+  if (screenMode == ScreenMode::BOOT) {
+    M5.Lcd.println("");
+    M5.Lcd.println("CHOOSE START MODE");
+    M5.Lcd.println("A: SETUP Wi-Fi AP");
+    M5.Lcd.println("B: CONNECT to Wi-Fi");
+    M5.Lcd.println("");
+    M5.Lcd.println("No auto setup after 30s");
+    return;
   }
+  if (screenMode == ScreenMode::SETUP) {
+    M5.Lcd.println("SETUP WPA2");
+    M5.Lcd.println(net.apSsid);
+    M5.Lcd.println(net.apPassword);
+    M5.Lcd.println("192.168.4.1/setup");
+    M5.Lcd.println("192.168.4.1/presets");
+    M5.Lcd.println("Hold B 2s: BOOT MENU");
+    return;
+  }
+  M5.Lcd.println("NETWORK: " +
+                 String(WiFi.status()==WL_CONNECTED ? "READY" : "CONNECTING"));
+  if (WiFi.status()==WL_CONNECTED)
+    M5.Lcd.println(WiFi.localIP().toString());
+  stored.load();
+  M5.Lcd.println("Saved commands: "+String(stored.count));
+  if (stored.count) {
+    if (selectedPreset >= stored.count) selectedPreset = 0;
+    M5.Lcd.println(String(selectedPreset + 1) + "/" + String(stored.count));
+    // Latin/ASCII labels work; default TFT font cannot shape Arabic labels.
+    M5.Lcd.println(stored.items[selectedPreset].name);
+    M5.Lcd.println(stored.items[selectedPreset].datetime);
+    M5.Lcd.println("A: NEXT");
+    M5.Lcd.println("B hold 2s: RUN");
+  } else {
+    M5.Lcd.println("No commands saved");
+    M5.Lcd.println("A long 3s: BOOT MENU");
+  }
+  M5.Lcd.println(statusLine);
 }
 
 void startHttpOnce() {
   if (serverStarted) return;
   net.attachRoutes(server);
+  stored.routes(server, net);
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html; charset=utf-8", PAGE);
@@ -384,7 +521,7 @@ void startHttpOnce() {
 
 void connectWifiIfNeeded() {
   static bool reported = false;
-  net.tick();
+  if (screenMode == ScreenMode::CONNECT) net.tick();
   const bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !reported) {
     reported = true;
@@ -408,6 +545,7 @@ void setup() {
   Serial.begin(115200);
   M5.Lcd.setRotation(1);
   net.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD, ZK_DEVICE_IP);
+  stored.load();
   // No network write to attendance device on startup.
   connectWifiIfNeeded();
   drawScreen();
@@ -415,27 +553,65 @@ void setup() {
 
 void loop() {
   M5.update();
-  connectWifiIfNeeded();
-  if (!M5.BtnB.isPressed()) buttonBLatched = false;
-  if (!buttonBLatched && M5.BtnB.pressedFor(1800)) {
-    buttonBLatched = true;
-    if (net.apOn) net.stopAP(); else net.startAP();
-    drawScreen();
+  if (screenMode == ScreenMode::BOOT) {
+    if (M5.BtnA.wasPressed()) {
+      screenMode = ScreenMode::SETUP;
+      net.startAP();
+      if (net.apOn) startHttpOnce();
+      drawScreen();
+    } else if (M5.BtnB.wasPressed()) {
+      screenMode = ScreenMode::CONNECT;
+      net.lastAttempt = millis() - 15000;
+      drawScreen();
+    }
+    delay(18);
+    return;
   }
-  if (net.apOn && !serverStarted) startHttpOnce();
+
+  connectWifiIfNeeded();
+  if (screenMode == ScreenMode::SETUP) {
+    if (M5.BtnB.pressedFor(2000) && !buttonBLatched) {
+      buttonBLatched = true;
+      net.stopAP();
+      screenMode = ScreenMode::BOOT;
+      drawScreen();
+    }
+    if (!M5.BtnB.isPressed()) buttonBLatched = false;
+  } else {
+    if (M5.BtnA.wasPressed()) {
+      if (stored.count) selectedPreset = (selectedPreset + 1) % stored.count;
+      drawScreen();
+    }
+    if (M5.BtnA.pressedFor(3000) && !buttonALatched) {
+      buttonALatched = true;
+      WiFi.disconnect(false, false);
+      screenMode = ScreenMode::BOOT;
+      drawScreen();
+    }
+    if (!M5.BtnA.isPressed()) buttonALatched = false;
+
+    if (stored.count && !buttonBLatched) {
+      if (!longShiftHold && M5.BtnB.pressedFor(2200)) {
+        RunResult result = executeSelected(false);
+        if (result == RunResult::NEED_LONG_HOLD)
+          longShiftHold = true;
+        else
+          buttonBLatched = true;
+        drawScreen();
+      }
+      if (longShiftHold && M5.BtnB.pressedFor(4200)) {
+        executeSelected(true);
+        buttonBLatched = true;
+        longShiftHold = false;
+        drawScreen();
+      }
+    }
+    if (!M5.BtnB.isPressed()) {
+      buttonBLatched = false;
+      longShiftHold = false;
+    }
+  }
   if ((WiFi.status() == WL_CONNECTED || net.apOn) && serverStarted)
     server.handleClient();
-  if (M5.BtnA.wasPressed()) {
-    String clock, error;
-    uint32_t ms = 0;
-    if (readDeviceClock(clock, error, ms)) {
-      lastClock = clock;
-      statusLine = "READ OK";
-    } else {
-      statusLine = "READ FAILED";
-      Serial.println(error);
-    }
-    drawScreen();
-  }
   delay(15);
 }

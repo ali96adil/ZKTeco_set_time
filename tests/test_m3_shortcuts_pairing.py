@@ -14,10 +14,6 @@ class ShortcutTests(unittest.TestCase):
     def test_target_clock_compositions(self):
         current = datetime(2026, 10, 29, 14, 25, 31)
         cases = [
-            ({"id": "a", "name": "Morning", "kind": "time", "value": "08:10:00"},
-             datetime(2026, 10, 29, 8, 10)),
-            ({"id": "b", "name": "Date", "kind": "date", "value": "2026-11-01"},
-             datetime(2026, 11, 1, 14, 25, 31)),
             ({"id": "c", "name": "Full", "kind": "datetime", "value": "2027-01-01T01:02:03"},
              datetime(2027, 1, 1, 1, 2, 3)),
             ({"id": "d", "name": "Sync", "kind": "phone", "value": ""},
@@ -30,7 +26,8 @@ class ShortcutTests(unittest.TestCase):
 
     def test_invalid_dates_and_duplicate_ids(self):
         for kind, value in [("date", "2026-02-29"), ("time", "25:00:00"),
-                            ("datetime", "1990-01-01T12:00:00")]:
+                            ("datetime", "1990-01-01T12:00:00"),
+                            ("datetime", "2026-02-29T12:00:00")]:
             with self.subTest(kind=kind):
                 with self.assertRaises(ValueError):
                     validate_shortcut({"id": "x", "name": "Test", "kind": kind,

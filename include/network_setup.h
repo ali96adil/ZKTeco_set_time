@@ -13,7 +13,6 @@ public:
   String ssid, password, zkIp, apSsid, apPassword;
   bool apOn = false;
   bool ready = false;
-  uint32_t startedAt = 0;
   uint32_t lastAttempt = 0;
 
   void begin(const char* initialSsid, const char* initialPass, const char* initialIp) {
@@ -34,7 +33,6 @@ public:
       p.putString("apkey", apPassword);
     }
     p.end();
-    startedAt = millis();
     lastAttempt = millis() - 15000;
     WiFi.setAutoReconnect(true);
     ready = true;
@@ -112,7 +110,7 @@ public:
 
   void startAP() {
     if (apOn) return;
-    WiFi.mode(WIFI_AP_STA);
+    WiFi.mode(WIFI_AP);
     String suffix = WiFi.macAddress();
     suffix.replace(":", "");
     apSsid = "ZK-Setup-" + suffix.substring(
@@ -132,16 +130,18 @@ public:
     if (!apOn) return;
     WiFi.softAPdisconnect(true);
     apOn = false;
+    WiFi.mode(WIFI_STA);
+    lastAttempt = millis() - 15000;
     Serial.println("M5 setup AP disabled");
   }
 
   void tick() {
-    if (!ready) return;
+    if (!ready || apOn) return;
     if (WiFi.status() == WL_CONNECTED) return;
     if (millis() - lastAttempt >= 15000) {
       lastAttempt = millis();
       if (ssid.length()) {
-        WiFi.mode(apOn ? WIFI_AP_STA : WIFI_STA);
+        WiFi.mode(WIFI_STA);
         if (password.length() == 0) {
           WiFi.setMinSecurity(WIFI_AUTH_OPEN);
           WiFi.begin(ssid.c_str());
@@ -150,6 +150,5 @@ public:
         }
       }
     }
-    if (!apOn && millis() - startedAt >= 30000) startAP();
   }
 };

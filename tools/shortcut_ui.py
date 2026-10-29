@@ -6,10 +6,12 @@ def shortcut_panel(csrf: str, enable_write: bool) -> str:
     controls = "" if enable_write else "<p class='note'>التطبيق الفعلي متوقف؛ شغّل السيرفر بـ --enable-write عند الحاجة.</p>"
     return (
         """<section class="card" id="quickPanel">
-<h2 style="font-size:18px">اختصارات الساعة المحفوظة</h2>
-<p class="small">اضغط الاختصار للتطبيق مباشرة على الجهاز الحقيقي، بدون سلسلة نوافذ تأكيد.
+<h2 style="font-size:18px">أوامر التاريخ والوقت المحفوظة</h2>
+<p class="small">كل اختصار يحدد التاريخ والوقت معاً، أو يزامن الوقت الحالي للهاتف. ضغطة واحدة تنفذ الأمر على الجهاز الحقيقي.
 بعد التنفيذ تُقرأ الساعة مرة واحدة للتحقق. التغييرات الأكبر من يوم تحتاج التأكيد اليدوي.</p>
 <div id="shortcutList"></div>
+<button type="button" id="copyM5" class="primary" style="background:#526578;margin:10px 0">نسخ أوامر التاريخ والوقت للـM5</button>
+<p class="small">الصق الناتج من هذا الزر بصفحة 192.168.4.1/presets في وضع إعداد M5. مزامنة الهاتف تعمل من الموبايل فقط.</p>
 <hr>
 <h3 style="font-size:16px">إضافة اختصار</h3>
 <label for="quickName">اسم الزر</label>
@@ -17,9 +19,7 @@ def shortcut_panel(csrf: str, enable_write: bool) -> str:
 <label for="quickKind">نوع الاختصار</label>
 <select id="quickKind" style="width:100%;padding:12px;background:#0e1c2c;color:white">
 <option value="phone">مزامنة مع الهاتف</option>
-<option value="time">وقت فقط (يبقى تاريخ الجهاز)</option>
-<option value="date">تاريخ فقط (تبقى ساعة الجهاز)</option>
-<option value="datetime">تاريخ ووقت محددان</option>
+<option value="datetime">ضبط التاريخ والوقت معاً</option>
 </select>
 <div id="quickValueBox" hidden><label for="quickValue">القيمة</label>
 <input id="quickValue" type="time" step="1"></div>
@@ -46,8 +46,6 @@ async function request(path,method,body){
 }
 function kindTitle(p){
  if(p.kind==='phone')return 'مزامنة';
- if(p.kind==='time')return 'وقت '+p.value;
- if(p.kind==='date')return 'تاريخ '+p.value;
  return p.value.replace('T',' ');
 }
 function repaint(){
@@ -94,10 +92,24 @@ function repaint(){
 function updateField(){
  const kind=e('quickKind').value;
  e('quickValueBox').hidden=kind==='phone';
- e('quickValue').type=kind==='time'?'time':kind==='date'?'date':'datetime-local';
+ e('quickValue').type='datetime-local';
  e('quickValue').step=1;
  e('quickValue').value='';
 }
+e('copyM5').onclick=async()=>{
+ try{
+   const records=items.filter(p=>p.kind==='datetime');
+   if(!records.length)throw Error('ماكو أوامر تاريخ ووقت كاملة حتى تنسخها');
+   if(records.length>8)throw Error('M5 يقبل 8 أوامر فقط؛ قلل العدد أولاً');
+   for(const p of records){
+     if(new TextEncoder().encode(p.name).length>24 || /[|\r\n]/.test(p.name))
+       throw Error('اختصر اسم '+p.name+' إلى 24 بايت وبدون |');
+   }
+   const text=records.map(p=>p.name+'|'+p.value).join('\n');
+   await navigator.clipboard.writeText(text);
+   status('اننسخت '+records.length+' أوامر. افتح شبكة إعداد M5 والصقها في استيراد الأوامر.');
+ }catch(err){status('تعذر نسخ الأوامر: '+err.message);}
+};
 e('quickKind').onchange=updateField;
 e('shortcutSave').onclick=async()=>{
  try{
@@ -107,7 +119,6 @@ e('shortcutSave').onclick=async()=>{
    const kind=e('quickKind').value;
    let value=kind==='phone'?'':e('quickValue').value;
    if(kind==='datetime'&&value.length===16)value+=':00';
-   if(kind==='time'&&value.length===5)value+=':00';
    if(kind!=='phone'&&!value)throw Error('أدخل قيمة صحيحة');
    const id='p'+Date.now().toString(36);
    const next=[...items,{id,name,kind,value}];
