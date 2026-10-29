@@ -461,13 +461,13 @@ void drawScreen() {
     return;
   }
   if (screenMode == ScreenMode::SETUP) {
-    M5.Lcd.println("SETUP WPA2");
+    // 240x135 M5StickC Plus screen: keep password and URL clearly visible.
+    M5.Lcd.println("SETUP WiFi (WPA2)");
     M5.Lcd.println(net.apSsid);
-    M5.Lcd.println(net.apPassword);
-    M5.Lcd.println("192.168.4.1/setup");
-    M5.Lcd.println("192.168.4.1/presets");
-    M5.Lcd.println("192.168.4.1/rtc");
-    M5.Lcd.println("Hold B 2s: BOOT MENU");
+    M5.Lcd.println("PASS: " + net.apPassword);
+    M5.Lcd.println("URL: 192.168.4.1");
+    M5.Lcd.println("Pages: /setup /rtc");
+    M5.Lcd.println("Also: /presets");
     return;
   }
   M5.Lcd.println("NETWORK: " +
