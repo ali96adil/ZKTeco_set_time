@@ -4,6 +4,16 @@
 
 > The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
 
+## M8 — Fast one-page M5 control (working draft)
+
+**New branch:** [feature/m8-fast-home-local-edit](https://github.com/ali96adil/ZKTeco_set_time/tree/feature/m8-fast-home-local-edit) · [operator guide](docs/M8_FAST_UI_LOCAL_EDIT.md) · [PR #8](https://github.com/ali96adil/ZKTeco_set_time/pull/8).
+
+- `http://zkclock.local/` now contains **all essential tabs on one page** (Home, Commands, Settings, RTC). Saved shortcuts and the M5 RTC source appear on the Home screen, so you can **Prepare** them without navigating to another HTML page.
+- In CONNECT mode, physical **A+B hold ~2 seconds** unlocks editing of saved full-date-time shortcuts, setup AP name, and LCD sleep duration for **90 seconds**. A successful edit closes the window. The station Wi-Fi password is never read, edited or sent over unencrypted campus Wi-Fi.
+- **Prepare selects only**: it selects the command on M5's LCD. Clock-write execution remains a *physical hold-B* operation only in a separately validated write-enabled lab build; regular firmware stays **READ ONLY**.
+- The same `zkclock.local` mDNS name is attempted on the protected setup AP; `192.168.4.1` is a fallback if iPhone does not resolve mDNS while joined to it.
+- M5 does not use the temporary Mac HTTPS CA. Open HTTP on the university network is still unencrypted and has interception risk; for secure remote time writes use a verified TLS gateway/segregated network. Brief-on-demand operation does not remove that risk.
+
 ## M5 — Stable iPhone Home Screen and calibrated M5 RTC
 
 **In draft branch `feature/m5-home-rtc`**. Full guide: [Home Screen, trusted Bonjour URL and RTC clock](docs/M5_HOME_RTC_ZK_CAPABILITIES.md).
