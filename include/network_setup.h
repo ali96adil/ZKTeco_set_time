@@ -18,10 +18,21 @@ public:
 
   void begin(const char* initialSsid, const char* initialPass, const char* initialIp) {
     Preferences p;
-    p.begin("zk-net", true);
+    p.begin("zk-net", false);
     ssid = p.getString("ssid", initialSsid);
     password = p.getString("pass", initialPass);
     zkIp = p.getString("zkip", initialIp);
+    apPassword = p.getString("apkey", "");
+    if (apPassword.length() != 14) {
+      // Generate the WPA2 setup password only once, then retain it in NVS.
+      // The user's iPhone can remember the same protected M5 setup SSID.
+      static const char characters[] =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+      apPassword = "";
+      for (int i = 0; i < 14; ++i)
+        apPassword += characters[esp_random() % (sizeof(characters) - 1)];
+      p.putString("apkey", apPassword);
+    }
     p.end();
     startedAt = millis();
     lastAttempt = millis() - 15000;
@@ -106,11 +117,8 @@ public:
     suffix.replace(":", "");
     apSsid = "ZK-Setup-" + suffix.substring(
       suffix.length() > 6 ? suffix.length() - 6 : 0);
-    static const char characters[] =
-      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-    apPassword = "";
-    for (int i = 0; i < 14; ++i)
-      apPassword += characters[esp_random() % (sizeof(characters) - 1)];
+    // The 14-character WPA2 secret is fixed per M5 and saved in Preferences.
+    // It is displayed only on the physical M5 and never sent to campus Wi-Fi.
     if (WiFi.softAP(apSsid.c_str(), apPassword.c_str(), 6, false, 2)) {
       apOn = true;
       Serial.println("WPA2 setup AP enabled; password is on physical M5 screen.");
@@ -124,7 +132,6 @@ public:
     if (!apOn) return;
     WiFi.softAPdisconnect(true);
     apOn = false;
-    apPassword = "";
     Serial.println("M5 setup AP disabled");
   }
 
