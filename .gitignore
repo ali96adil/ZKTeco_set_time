@@ -10,3 +10,7 @@ include/config.h
 .secrets/
 *.key
 *.pem
+
+# M9 device-specific HTTPS private key embedded in local firmware build only
+include/m5_tls_local.h
+.secrets/m5-*
