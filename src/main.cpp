@@ -11,6 +11,7 @@
 #include "zk_wire.h"
 #include "network_setup.h"
 #include "m5_presets.h"
+#include "m5_rtc.h"
 #ifndef ZK_ENABLE_M5_TIME_WRITE
 #define ZK_ENABLE_M5_TIME_WRITE 0
 #endif
@@ -26,6 +27,7 @@ constexpr uint32_t TIMEOUT_MS = 5000;
 WebServer server(80);
 NetworkSetup net;
 M5Presets stored;
+M5Clock rtcClock;
 enum class ScreenMode { BOOT, SETUP, CONNECT };
 ScreenMode screenMode = ScreenMode::BOOT;
 uint8_t selectedPreset = 0;
@@ -175,9 +177,14 @@ RunResult executeSelected(bool allowLargeShift) {
     return RunResult::FAILED;
   }
   stored.load();
-  if (selectedPreset >= stored.count) return RunResult::FAILED;
+  if (selectedPreset > stored.count) return RunResult::FAILED;
   zkwire::CivilTime target;
-  if (!parseCivil(stored.items[selectedPreset].datetime, target)) {
+  if (selectedPreset == stored.count) {
+    if (!rtcClock.trustworthy(target)) {
+      statusLine = "RTC NOT CALIBRATED: SETUP";
+      return RunResult::FAILED;
+    }
+  } else if (!parseCivil(stored.items[selectedPreset].datetime, target)) {
     statusLine = "INVALID PRESET";
     return RunResult::FAILED;
   }
@@ -454,6 +461,7 @@ void drawScreen() {
     M5.Lcd.println(net.apPassword);
     M5.Lcd.println("192.168.4.1/setup");
     M5.Lcd.println("192.168.4.1/presets");
+    M5.Lcd.println("192.168.4.1/rtc");
     M5.Lcd.println("Hold B 2s: BOOT MENU");
     return;
   }
@@ -462,19 +470,20 @@ void drawScreen() {
   if (WiFi.status()==WL_CONNECTED)
     M5.Lcd.println("zkclock.local");
   stored.load();
-  M5.Lcd.println("Saved commands: "+String(stored.count));
-  if (stored.count) {
-    if (selectedPreset >= stored.count) selectedPreset = 0;
-    M5.Lcd.println(String(selectedPreset + 1) + "/" + String(stored.count));
-    // Latin/ASCII labels work; default TFT font cannot shape Arabic labels.
+  M5.Lcd.println("Commands: "+String(stored.count)+" + M5 RTC");
+  if (selectedPreset > stored.count) selectedPreset = 0;
+  M5.Lcd.println(String(selectedPreset + 1) + "/" + String(stored.count + 1));
+  // Latin/ASCII labels work; default TFT font cannot shape Arabic labels.
+  if (selectedPreset == stored.count) {
+    zkwire::CivilTime currentRtc;
+    bool trusted = rtcClock.trustworthy(currentRtc);
+    M5.Lcd.println("SYNC FROM M5 RTC");
+    M5.Lcd.println(trusted ? M5Clock::asString(currentRtc) : "RTC NOT CALIBRATED");
+  } else {
     M5.Lcd.println(stored.items[selectedPreset].name);
     M5.Lcd.println(stored.items[selectedPreset].datetime);
-    M5.Lcd.println("A: NEXT");
-    M5.Lcd.println("B hold 2s: RUN");
-  } else {
-    M5.Lcd.println("No commands saved");
-    M5.Lcd.println("A long 3s: BOOT MENU");
   }
+  M5.Lcd.println("A: NEXT / B hold: RUN");
   M5.Lcd.println(statusLine);
 }
 
@@ -482,6 +491,7 @@ void startHttpOnce() {
   if (serverStarted) return;
   net.attachRoutes(server);
   stored.routes(server, net);
+  rtcClock.routes(server, net);
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html; charset=utf-8", PAGE);
@@ -554,6 +564,7 @@ void setup() {
   M5.Lcd.setRotation(1);
   net.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD, ZK_DEVICE_IP);
   stored.load();
+  rtcClock.begin();
   // No network write to attendance device on startup.
   connectWifiIfNeeded();
   drawScreen();
@@ -587,7 +598,7 @@ void loop() {
     if (!M5.BtnB.isPressed()) buttonBLatched = false;
   } else {
     if (M5.BtnA.wasPressed()) {
-      if (stored.count) selectedPreset = (selectedPreset + 1) % stored.count;
+      selectedPreset = (selectedPreset + 1) % (stored.count + 1);
       drawScreen();
     }
     if (M5.BtnA.pressedFor(3000) && !buttonALatched) {
@@ -598,7 +609,7 @@ void loop() {
     }
     if (!M5.BtnA.isPressed()) buttonALatched = false;
 
-    if (stored.count && !buttonBLatched) {
+    if (!buttonBLatched) {
       if (!longShiftHold && M5.BtnB.pressedFor(2200)) {
         RunResult result = executeSelected(false);
         if (result == RunResult::NEED_LONG_HOLD)
