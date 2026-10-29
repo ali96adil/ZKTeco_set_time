@@ -31,6 +31,8 @@ class M8Contracts(unittest.TestCase):
     def test_physical_arm_is_required_for_station_edits(self):
         self.assertIn("M5.BtnA.pressedFor(1600)",SRC)
         self.assertIn("M5.BtnB.pressedFor(1600)",SRC)
+        self.assertIn("if (comboLatched)",SRC)
+        self.assertIn("!M5.BtnA.isPressed() && !M5.BtnB.isPressed()",SRC)
         self.assertIn('server.collectHeaders(m8Headers,1)',SRC)
         self.assertIn('server.header("X-ZK-Edit") != "1"',SRC)
         self.assertIn("localArm.allowed() || net.setupClient(server)",SRC)
@@ -49,7 +51,7 @@ class M8Contracts(unittest.TestCase):
     def test_no_auto_device_write(self):
         self.assertNotIn("setTimeout(()=>location", WEB)
         self.assertIn("server.send_P(200",SRC)
-        self.assertIn("Connection","Connection")
+        self.assertIn('server.sendHeader("Connection","close")',SRC)
         self.assertNotIn("CMD_SET_TIME",WEB)
 
 if __name__=="__main__":
