@@ -28,7 +28,7 @@ There is deliberately **no open, password-free M5 setup AP**.
 
 ## Mac gateway: paired Safari without repeated passwords
 
-The university network is unencrypted Wi-Fi, so HTTPS trust is mandatory. Continue using the previously generated short-lived local CA and IP-SAN server certificate. A fresh terminal password is still an emergency fallback, but pairing makes everyday Safari use password-free.
+The university network is unencrypted Wi-Fi, so HTTPS trust is mandatory. Continue using the previously generated short-lived local CA and IP-SAN server certificate. The `--paired-only` option disables Basic password login entirely. The first session uses a short pairing code shown on the Mac once, and subsequent Safari sessions use the remembered cookie without entering a password.
 
 From the project directory, with the trusted TLS certificates already created:
 
@@ -40,12 +40,12 @@ git pull --ff-only origin feature/m3-network-presets
 ~/zkteco-clock/.venv/bin/python tools/mac_live_control.py \
   --bind 0.0.0.0 --port 8766 \
   --cert .secrets/mac.crt --key .secrets/mac.key \
-  --enable-pairing
+  --enable-pairing --paired-only
 ```
 
 The Mac prints a **one-time eight-digit pairing code**, valid for **five minutes** and **five unsuccessful attempts**. On the iPhone, open the trusted `https://MAC_IP:8766/` address, enter the code once and pair. The gateway sets a `Secure; HttpOnly; SameSite=Strict` cookie, backed by a **SHA-256 hashed token** in local `.secrets/paired_phones.json`.
 
-Restarting the gateway **without `--enable-pairing`** should recognize the same Safari browser for up to 30 days, as long as the cookie and the local token store remain. Clearing Safari site data/private browsing or changing phones requires pairing again.
+Restarting the gateway **without `--enable-pairing`**, but with `--paired-only`, should recognize the same Safari browser for up to 30 days, as long as the cookie and the local token store remain. Clearing Safari site data/private browsing or changing phones requires pairing again.
 
 Pair only a personally controlled phone. To revoke all paired phones, **stop the server first**, then delete `.secrets/paired_phones.json` from the Mac and restart. This invalidates all remembered sessions. Only up to five paired phones can be stored.
 
@@ -67,10 +67,10 @@ For the approved clock maintenance session, stop the server and restart with bot
 ~/zkteco-clock/.venv/bin/python tools/mac_live_control.py \
   --bind 0.0.0.0 --port 8766 \
   --cert .secrets/mac.crt --key .secrets/mac.key \
-  --enable-write
+  --enable-write --paired-only
 ```
 
-Because Safari is already paired, it should reopen without asking for a new password.
+Because Safari is already paired, it should reopen without asking for a new password. Without `--paired-only`, the previous rotating Basic password fallback still exists for compatibility with earlier deployments.
 
 **One tap:** tapping a shortcut sends one time-write request, then makes **one new connection to verify** the result. The button is locked during execution, and the server prevents consecutive quick actions within eight seconds. There is no automatic retry if the command result is ambiguous. `UNVERIFIED` requires inspecting the terminal first.
 
