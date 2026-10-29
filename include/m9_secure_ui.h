@@ -44,7 +44,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 [hidden]{display:none!important}
 </style></head><body>
 <div class="wrap">
-<header class="top"><div><small>ZKTeco / M5StickC Plus</small><h1>التحكم بالساعة</h1></div><span class="status"><span id="modeState">READ ONLY</span></span></header>
+<header class="top"><div><small>ZKTeco / M5StickC Plus</small><h1>التحكم بالساعة</h1></div><span class="status"><span id="modeState">ZK CLOCK</span></span></header>
 <nav class="tabbar" aria-label="الصفحات">
 <button data-tab="home" class="active">الرئيسية</button>
 <button data-tab="presets">الأوامر</button>
@@ -60,7 +60,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <div class="card">
 <div class="row"><h2>الأوامر السريعة</h2><small id="count">—</small></div>
 <div id="homePresets"><p class="note">جاري تحميل الأوامر…</p></div>
-<p class="note">الزر ينفذ من الآيفون مباشرة بعد الدخول الموثوق. نسخة READ ONLY تبقى للفحص.</p>
+<p class="note">التنفيذ المباشر عبر HTTPS مع تأكيد قبل تغيير الوقت وقراءة تحقق مستقلة بعد التنفيذ.</p>
 </div>
 <div class="card">
 <div class="row"><div><h2>تسجيل الدخول</h2><p class="note">الدخول محفوظ على الآيفون ويتجدد تلقائياً</p></div>
@@ -92,8 +92,8 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <option value="0">بدون نوم</option>
 </select>
 <button class="action" id="saveSettings">حفظ الاسم والنوم</button>
-<p class="note">الاسم الجديد يشتغل عند دخول وضع SETUP مرة ثانية. إعداد اتصال Wi-Fi الأولي من شبكة SETUP؛ بيانات الحساب والجلسة عبر HTTPS.</p>
-<p class="note">تغيير شبكة اتصال M5 نفسها يتم بوضع SETUP على الجهاز: 192.168.4.1/setup</p>
+<p class="note">اسم شبكة الإعداد يتفعّل عند دخول SETUP مرة ثانية. لتغيير Wi-Fi أو حساب الجهاز، اختار A — SETUP على الـM5 واتصل بشبكته؛ افتح نفس العنوان https://zkclock.local.</p>
+<p class="note">رابط الإعدادات في وضع SETUP: https://zkclock.local/setup. البديل إذا mDNS غير متوفر: https://192.168.4.1/setup.</p>
 </div>
 </section>
 <section id="rtc" hidden>
@@ -146,6 +146,8 @@ function drawHome(){
    btn.onclick=async()=>{
      if(busy)return;busy=true;btn.disabled=true;
      try{
+       if(!state.write_enabled)return message('التنفيذ مو متاح بهالنسخة');
+       if(!confirm('تأكيد تعديل ساعة البصمة حسب الأمر: '+p.name+'؟'))return;
        let r=await api('/api/m9/run','POST',{index:String(i)});
        if(r.requires_large_confirmation){
          if(!confirm('الفرق أكبر من 24 ساعة. متأكد تريد تطبيق التاريخ والوقت؟'))return;
@@ -180,7 +182,7 @@ function drawEditor(){
 async function refresh(){
  try{
    state=await api('/api/m9');
-   el('modeState').textContent=state.write_enabled?'HTTPS CONTROL':'READ ONLY';
+   el('modeState').textContent=state.write_enabled?'تحكم فعّال':'وضع تشخيص';
    editor=(state.items||[]).map(x=>({name:x.name,datetime:x.datetime}));
    el('sta').textContent=state.ssid||'غير محددة';
    el('zkip').textContent=state.zk_ip;
