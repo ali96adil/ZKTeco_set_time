@@ -2,7 +2,7 @@
 
 This separate Mac gateway runs the existing mobile dashboard and uses the same previously verified `pyzk` SDK for the ZKTeco iFace 950 on `10.1.65.2:4370`. **The earlier `mock` mode always changes a virtual clock only.** This is different: when deliberately enabled, this gateway can change the **actual** terminal's date/time.
 
-**Current status: experimental draft. No live terminal write has been performed with the gateway code. Test/verify before use in production.** It is NOT ESP32 firmware.
+**Current status: Mac-to-terminal live write path was field-tested successfully on 2026-10-29 for both manual and phone time adjustments; full production security qualification and M5 hardware qualification are still pending.** It is NOT ESP32 firmware. See [sanitized qualification evidence](FIELD_QUALIFICATION_2026-10-29.md).
 
 ## Three modes
 
@@ -98,6 +98,8 @@ A backwards correction may create overlapping timestamps for **new** attendance 
 - [x] Python syntax, mocked one-shot verification and read-only guard tested in GitHub Actions; see linked workflow run in pull request.
 - [ ] Browser authentication, CSRF and trusted HTTPS fully qualified on the operator's Mac + iPhone.
 - [ ] Trusted mobile HTTPS certificate and authorization reviewed.
-- [ ] Controlled live write via this new gateway confirmed by an operator during an approved maintenance window.
+- [x] Manual live clock adjustment: +92 seconds, `sent=True verified=True write_error=None` (2026-10-29 operator log).
+- [x] Phone live clock adjustment: −92 seconds, `sent=True verified=True write_error=None` (2026-10-29 operator log).
+- [ ] Physical device screen confirmation and complete deployment/security review.
 
-This document and code do not prove that the new gateway was used on the live attendance device.
+The operator-provided 2026-10-29 gateway logs prove the new Mac gateway executed live clock adjustments and its verification logic accepted two successive reads per adjustment. These logs do not prove the M5 hardware works or that other attendance-device data was independently inspected.
