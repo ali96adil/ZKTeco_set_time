@@ -576,7 +576,15 @@ void loop() {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
       net.startAP();
-      if (net.apOn) startHttpOnce();
+      if (net.apOn) {
+        // Advertise the same friendly address in setup mode when phone/mDNS
+        // supports it. The documented 192.168.4.1 fallback always remains.
+        if (!mdnsRunning && MDNS.begin("zkclock")) {
+          MDNS.addService("http","tcp",80);
+          mdnsRunning = true;
+        }
+        startHttpOnce();
+      }
       drawScreen();
     } else if (M5.BtnB.wasPressed()) {
       screenMode = ScreenMode::CONNECT;
@@ -591,6 +599,7 @@ void loop() {
   if (screenMode == ScreenMode::SETUP) {
     if (M5.BtnB.pressedFor(2000) && !buttonBLatched) {
       buttonBLatched = true;
+      if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
       net.stopAP();
       screenMode = ScreenMode::BOOT;
       drawScreen();
