@@ -80,11 +80,13 @@ public:
           safeHtml(savedApName.length() ? savedApName : apSsid) +
           "' required>"
           "<label>نوم الشاشة بعد فترة عدم استخدام</label>"
-          "<select name='idle' style='display:block;width:100%;padding:12px'>"
+          "<select id='idle' name='idle' style='display:block;width:100%;padding:12px'>"
           "<option value='15'>15 ثانية</option><option value='30'>30 ثانية</option>"
           "<option value='60'>دقيقة</option><option value='120'>دقيقتين</option>"
           "<option value='0'>بدون نوم</option></select>"
           "<button type='submit'>حفظ الإعدادات</button></form>";
+        page += "<script>document.getElementById('idle').value='" +
+          String(idle.timeout()) + "';</script>";
       } else {
         page += "<p style='background:#393023;padding:12px'>للتعديل: اضغط A مطولاً "
           "على M5 للعودة لقائمة البداية، ثم A لاختيار SETUP، واتصل بشبكته "
