@@ -2,7 +2,7 @@ name: M5StickC Plus M2 read-only build
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session]
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session, release/v1.0.0-rc1]
   pull_request:
 
 permissions:
@@ -44,6 +44,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_m8_fast_local.py' -v
       - name: M9 HTTPS sessions, login, no HTTP station server
         run: python3 -m unittest discover -s tests -p 'test_m9_*.py' -v
+      - name: v1 release safeguards and endpoint regression
+        run: python3 -m unittest discover -s tests -p 'test_release_v1.py' -v
       - name: M5 Home Screen metadata and RTC availability contract
         run: python3 -m unittest discover -s tests -p 'test_m5_home_rtc.py' -v
       - name: Check local hostname certificate scripts
