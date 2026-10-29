@@ -7,6 +7,7 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <M5StickCPlus.h>
+#include <qrcode.h>
 #include "config.h"
 #include "zk_wire.h"
 #include "network_setup.h"
@@ -36,6 +37,7 @@ bool longShiftHold = false;
 bool buttonALatched = false;
 bool commandBusy = false;
 bool mdnsRunning = false;
+bool showSetupQr = true;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
@@ -444,52 +446,104 @@ render();
 </script></body></html>
 )HTML";
 
+// M5StickC Plus: 240 x 135 px landscape. Default font size 1 was
+// unreadably small. Keep a high contrast two-page physical setup UI.
+// QR is Wi-Fi credentials only, never ZKTeco control or attendance data.
+void drawSetupQr() {
+  M5.Lcd.fillScreen(BLACK);
+  String payload = "WIFI:T:WPA;S:" + net.apSsid +
+                   ";P:" + net.apPassword + ";;";
+  QRCode qr;
+  uint8_t data[qrcode_getBufferSize(4)] = {};
+  // Version 4, medium correction: 33x33 modules. With 4-module white
+  // quiet-zone around it, 41*3=123 px fits the 135px screen.
+  qrcode_initText(&qr, data, 4, ECC_MEDIUM, payload.c_str());
+  const int unit = 3;
+  const int left = 4;
+  const int top = 6;
+  const int quiet = 4;
+  const int side = (qr.size + quiet * 2) * unit;
+  M5.Lcd.fillRect(left, top, side, side, WHITE);
+  for (int y=0; y<qr.size; ++y) {
+    for (int x=0; x<qr.size; ++x) {
+      if (qrcode_getModule(&qr,x,y)) {
+        M5.Lcd.fillRect(left + (quiet+x)*unit,
+                        top + (quiet+y)*unit,unit,unit,BLACK);
+      }
+    }
+  }
+  M5.Lcd.setTextColor(WHITE,BLACK);
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.drawString("JOIN WIFI",133,9,2);
+  M5.Lcd.drawString("SCAN QR",133,32,2);
+  M5.Lcd.drawString("iPhone",133,58,2);
+  M5.Lcd.drawString("Camera",133,76,1);
+  M5.Lcd.drawString("A: PASS",133,101,2);
+  M5.Lcd.drawString("B hold: exit",133,121,1);
+}
+
+void drawSetupPassword() {
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextColor(WHITE,BLACK);
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.drawString("SETUP WIFI",8,3,2);
+  M5.Lcd.drawFastHLine(8,26,224,0x34BF);
+  M5.Lcd.setTextColor(0x9D9F,BLACK);
+  M5.Lcd.drawString("NETWORK NAME",8,31,1);
+  M5.Lcd.setTextColor(WHITE,BLACK);
+  M5.Lcd.drawString(net.apSsid,8,42,2);
+  M5.Lcd.setTextColor(0x9D9F,BLACK);
+  M5.Lcd.drawString("PASSWORD - FIRST / LAST",8,64,1);
+  M5.Lcd.setTextColor(WHITE,BLACK);
+  const int mid = net.apPassword.length()/2;
+  // Fixed-width and scaled: seven characters fit reliably in each half.
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.drawString(net.apPassword.substring(0,mid),8,79,2);
+  M5.Lcd.drawString(net.apPassword.substring(mid),126,79,2);
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.setTextColor(0xBDF7,BLACK);
+  M5.Lcd.drawString("type both parts without space",8,109,1);
+  M5.Lcd.drawString("A: QR    192.168.4.1",8,123,1);
+}
+
 void drawScreen() {
   M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(4, 4);
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.println("ZKTeco Clock");
+  M5.Lcd.setTextColor(WHITE,BLACK);
   M5.Lcd.setTextSize(1);
   if (screenMode == ScreenMode::BOOT) {
-    M5.Lcd.println("");
-    M5.Lcd.println("CHOOSE START MODE");
-    M5.Lcd.println("A: SETUP Wi-Fi AP");
-    M5.Lcd.println("B: CONNECT to Wi-Fi");
-    M5.Lcd.println("");
-    M5.Lcd.println("No auto setup after 30s");
+    M5.Lcd.drawString("ZKTeco CLOCK",10,6,2);
+    M5.Lcd.drawFastHLine(10,30,220,0x34BF);
+    M5.Lcd.fillRoundRect(8,38,224,39,6,0x13A5);
+    M5.Lcd.drawString("A",17,49,4);
+    M5.Lcd.drawString("SETUP WIFI",61,50,2);
+    M5.Lcd.fillRoundRect(8,84,224,39,6,0x13A5);
+    M5.Lcd.drawString("B",17,94,4);
+    M5.Lcd.drawString("CONNECT WIFI",61,96,2);
     return;
   }
   if (screenMode == ScreenMode::SETUP) {
-    // 240x135 M5StickC Plus screen: keep password and URL clearly visible.
-    M5.Lcd.println("SETUP WiFi (WPA2)");
-    M5.Lcd.println(net.apSsid);
-    M5.Lcd.println("PASS: " + net.apPassword);
-    M5.Lcd.println("URL: 192.168.4.1");
-    M5.Lcd.println("Pages: /setup /rtc");
-    M5.Lcd.println("Also: /presets");
+    if (showSetupQr) drawSetupQr();
+    else drawSetupPassword();
     return;
   }
-  M5.Lcd.println("NETWORK: " +
-                 String(WiFi.status()==WL_CONNECTED ? "READY" : "CONNECTING"));
+  M5.Lcd.drawString("ZKTeco CLOCK",7,3,2);
+  M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ? "WIFI CONNECTED" : "CONNECTING...",7,23,2);
   if (WiFi.status()==WL_CONNECTED)
-    M5.Lcd.println("zkclock.local");
+    M5.Lcd.drawString("zkclock.local",7,43,2);
   stored.load();
-  M5.Lcd.println("Commands: "+String(stored.count)+" + M5 RTC");
   if (selectedPreset > stored.count) selectedPreset = 0;
-  M5.Lcd.println(String(selectedPreset + 1) + "/" + String(stored.count + 1));
-  // Latin/ASCII labels work; default TFT font cannot shape Arabic labels.
+  M5.Lcd.drawString(String(selectedPreset + 1) + "/" + String(stored.count+1),7,63,2);
   if (selectedPreset == stored.count) {
     zkwire::CivilTime currentRtc;
-    bool trusted = rtcClock.trustworthy(currentRtc);
-    M5.Lcd.println("SYNC FROM M5 RTC");
-    M5.Lcd.println(trusted ? M5Clock::asString(currentRtc) : "RTC NOT CALIBRATED");
+    const bool good = rtcClock.trustworthy(currentRtc);
+    M5.Lcd.drawString("SYNC FROM M5 RTC",48,63,2);
+    M5.Lcd.drawString(good ? M5Clock::asString(currentRtc) : "RTC NOT SET",7,82,2);
   } else {
-    M5.Lcd.println(stored.items[selectedPreset].name);
-    M5.Lcd.println(stored.items[selectedPreset].datetime);
+    M5.Lcd.drawString(stored.items[selectedPreset].name,48,63,2);
+    M5.Lcd.drawString(stored.items[selectedPreset].datetime,7,82,2);
   }
-  M5.Lcd.println("A: NEXT / B hold: RUN");
-  M5.Lcd.println(statusLine);
+  M5.Lcd.drawString("A: NEXT     HOLD B: RUN",7,105,1);
+  M5.Lcd.drawString(statusLine,7,120,1);
 }
 
 void startHttpOnce() {
@@ -597,6 +651,7 @@ void loop() {
   if (screenMode == ScreenMode::BOOT) {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
+      showSetupQr = true;
       net.startAP();
       if (net.apOn) {
         // Advertise the same friendly address in setup mode when phone/mDNS
@@ -619,6 +674,10 @@ void loop() {
 
   connectWifiIfNeeded();
   if (screenMode == ScreenMode::SETUP) {
+    if (M5.BtnA.wasPressed()) {
+      showSetupQr = !showSetupQr;
+      drawScreen();
+    }
     if (M5.BtnB.pressedFor(2000) && !buttonBLatched) {
       buttonBLatched = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }

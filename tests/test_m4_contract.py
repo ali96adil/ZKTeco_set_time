@@ -22,9 +22,10 @@ class M4Contract(unittest.TestCase):
     def test_explicit_start_menu_not_30_second_fallback(self):
         main=(ROOT/"src/main.cpp").read_text(encoding="utf-8")
         network=(ROOT/"include/network_setup.h").read_text(encoding="utf-8")
-        self.assertIn("CHOOSE START MODE",main)
-        self.assertIn("A: SETUP Wi-Fi AP",main)
-        self.assertIn("B: CONNECT to Wi-Fi",main)
+        self.assertIn('M5.Lcd.drawString("SETUP WIFI"',main)
+        self.assertIn('M5.Lcd.drawString("CONNECT WIFI"',main)
+        self.assertIn('M5.Lcd.drawString("A"',main)
+        self.assertIn('M5.Lcd.drawString("B"',main)
         self.assertIn("ScreenMode::BOOT",main)
         self.assertIn("M5.BtnB.pressedFor(2200)",main)
         self.assertIn("M5.BtnB.pressedFor(4200)",main)
