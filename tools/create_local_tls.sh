@@ -38,11 +38,19 @@ openssl req -new -sha256 -nodes -newkey rsa:3072 \
   -keyout .secrets/mac.key -out .secrets/mac.csr \
   -subj "/CN=$MAC_IP"
 
+# Local Bonjour hostname survives DHCP IP changes; requires local mDNS routing.
+BONJOUR_HOST=""
+if command -v scutil >/dev/null 2>&1; then
+  LOCAL_NAME="$(scutil --get LocalHostName 2>/dev/null || true)"
+  if [[ "$LOCAL_NAME" =~ ^[A-Za-z0-9-]+$ ]]; then
+    BONJOUR_HOST=",$(printf 'DNS:%s.local' "$LOCAL_NAME")"
+  fi
+fi
 cat >.secrets/server.ext <<EOF
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature,keyEncipherment
 extendedKeyUsage = serverAuth
-subjectAltName = IP:$MAC_IP,IP:127.0.0.1,DNS:localhost
+subjectAltName = IP:$MAC_IP,IP:127.0.0.1,DNS:localhost$BONJOUR_HOST
 EOF
 openssl x509 -req -sha256 -days 7 \
   -in .secrets/mac.csr \
@@ -56,6 +64,7 @@ cp .secrets/ca.crt .secrets/ZKTeco_Local_CA.cer
 
 echo
 echo "Certificate bundle created for HTTPS IP: $MAC_IP"
+if [[ -n "$BONJOUR_HOST" ]]; then echo "Stable Bonjour hostname: https://$LOCAL_NAME.local:8766/"; fi
 echo "CA certificate to transfer to iPhone via AirDrop (public certificate only):"
 echo "  .secrets/ZKTeco_Local_CA.cer"
 echo "CA SHA256 fingerprint (verify before installing/trusting):"

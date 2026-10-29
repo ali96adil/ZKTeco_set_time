@@ -1,15 +1,17 @@
-// M1 READ-ONLY firmware. Intentionally DOES NOT IMPLEMENT CMD_SET_TIME (202).
+// M5 safe default: read-only firmware. Time-write laboratory path requires explicit build flag.
 // Target board: M5StickC Plus (original) + ESP32 Arduino.
 // No users, attendance records, biometric data or admin credentials accessed.
 #include <Arduino.h>
 #include <cstring>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 #include <M5StickCPlus.h>
 #include "config.h"
 #include "zk_wire.h"
 #include "network_setup.h"
 #include "m5_presets.h"
+#include "m5_rtc.h"
 #ifndef ZK_ENABLE_M5_TIME_WRITE
 #define ZK_ENABLE_M5_TIME_WRITE 0
 #endif
@@ -25,6 +27,7 @@ constexpr uint32_t TIMEOUT_MS = 5000;
 WebServer server(80);
 NetworkSetup net;
 M5Presets stored;
+M5Clock rtcClock;
 enum class ScreenMode { BOOT, SETUP, CONNECT };
 ScreenMode screenMode = ScreenMode::BOOT;
 uint8_t selectedPreset = 0;
@@ -32,6 +35,7 @@ bool buttonBLatched = false;
 bool longShiftHold = false;
 bool buttonALatched = false;
 bool commandBusy = false;
+bool mdnsRunning = false;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
@@ -173,9 +177,14 @@ RunResult executeSelected(bool allowLargeShift) {
     return RunResult::FAILED;
   }
   stored.load();
-  if (selectedPreset >= stored.count) return RunResult::FAILED;
+  if (selectedPreset > stored.count) return RunResult::FAILED;
   zkwire::CivilTime target;
-  if (!parseCivil(stored.items[selectedPreset].datetime, target)) {
+  if (selectedPreset == stored.count) {
+    if (!rtcClock.trustworthy(target)) {
+      statusLine = "RTC NOT CALIBRATED: SETUP";
+      return RunResult::FAILED;
+    }
+  } else if (!parseCivil(stored.items[selectedPreset].datetime, target)) {
     statusLine = "INVALID PRESET";
     return RunResult::FAILED;
   }
@@ -260,6 +269,11 @@ const char PAGE[] PROGMEM = R"HTML(
 <!doctype html><html lang="ar" dir="rtl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ZK Clock">
+<meta name="theme-color" content="#0c1725">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
 <title>ZKTeco Clock — M2 Preview</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,Tahoma,Arial,sans-serif}
@@ -447,32 +461,34 @@ void drawScreen() {
     return;
   }
   if (screenMode == ScreenMode::SETUP) {
-    M5.Lcd.println("SETUP WPA2");
+    // 240x135 M5StickC Plus screen: keep password and URL clearly visible.
+    M5.Lcd.println("SETUP WiFi (WPA2)");
     M5.Lcd.println(net.apSsid);
-    M5.Lcd.println(net.apPassword);
-    M5.Lcd.println("192.168.4.1/setup");
-    M5.Lcd.println("192.168.4.1/presets");
-    M5.Lcd.println("Hold B 2s: BOOT MENU");
+    M5.Lcd.println("PASS: " + net.apPassword);
+    M5.Lcd.println("URL: 192.168.4.1");
+    M5.Lcd.println("Pages: /setup /rtc");
+    M5.Lcd.println("Also: /presets");
     return;
   }
   M5.Lcd.println("NETWORK: " +
                  String(WiFi.status()==WL_CONNECTED ? "READY" : "CONNECTING"));
   if (WiFi.status()==WL_CONNECTED)
-    M5.Lcd.println(WiFi.localIP().toString());
+    M5.Lcd.println("zkclock.local");
   stored.load();
-  M5.Lcd.println("Saved commands: "+String(stored.count));
-  if (stored.count) {
-    if (selectedPreset >= stored.count) selectedPreset = 0;
-    M5.Lcd.println(String(selectedPreset + 1) + "/" + String(stored.count));
-    // Latin/ASCII labels work; default TFT font cannot shape Arabic labels.
+  M5.Lcd.println("Commands: "+String(stored.count)+" + M5 RTC");
+  if (selectedPreset > stored.count) selectedPreset = 0;
+  M5.Lcd.println(String(selectedPreset + 1) + "/" + String(stored.count + 1));
+  // Latin/ASCII labels work; default TFT font cannot shape Arabic labels.
+  if (selectedPreset == stored.count) {
+    zkwire::CivilTime currentRtc;
+    bool trusted = rtcClock.trustworthy(currentRtc);
+    M5.Lcd.println("SYNC FROM M5 RTC");
+    M5.Lcd.println(trusted ? M5Clock::asString(currentRtc) : "RTC NOT CALIBRATED");
+  } else {
     M5.Lcd.println(stored.items[selectedPreset].name);
     M5.Lcd.println(stored.items[selectedPreset].datetime);
-    M5.Lcd.println("A: NEXT");
-    M5.Lcd.println("B hold 2s: RUN");
-  } else {
-    M5.Lcd.println("No commands saved");
-    M5.Lcd.println("A long 3s: BOOT MENU");
   }
+  M5.Lcd.println("A: NEXT / B hold: RUN");
   M5.Lcd.println(statusLine);
 }
 
@@ -480,6 +496,24 @@ void startHttpOnce() {
   if (serverStarted) return;
   net.attachRoutes(server);
   stored.routes(server, net);
+  rtcClock.routes(server, net);
+  server.on("/manifest.webmanifest", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200,"application/manifest+json",
+      "{\"name\":\"ZKTeco M5 Clock\",\"short_name\":\"ZK M5\","
+      "\"start_url\":\"/\",\"display\":\"standalone\","
+      "\"theme_color\":\"#0c1725\",\"background_color\":\"#0c1725\","
+      "\"icons\":[{\"src\":\"/icon.svg\",\"sizes\":\"any\","
+      "\"type\":\"image/svg+xml\"}]}");
+  });
+  server.on("/icon.svg", HTTP_GET, []() {
+    server.send(200,"image/svg+xml",
+      "<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'"
+      " viewBox='0 0 180 180'><rect width='180' height='180' rx='32'"
+      " fill='#0c1725'/><circle cx='90' cy='90' r='62' fill='#2376cf'/>"
+      "<path d='M90 48v43h33' stroke='white' stroke-width='11'"
+      " stroke-linecap='round' fill='none'/></svg>");
+  });
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html; charset=utf-8", PAGE);
@@ -524,6 +558,11 @@ void connectWifiIfNeeded() {
   if (screenMode == ScreenMode::CONNECT) net.tick();
   const bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !reported) {
+    if (!mdnsRunning && MDNS.begin("zkclock")) {
+      MDNS.addService("http", "tcp", 80);
+      mdnsRunning = true;
+      Serial.println("Bonjour local address: http://zkclock.local/");
+    }
     reported = true;
     statusLine = "WIFI CONNECTED";
     Serial.println("M5 IP: " + WiFi.localIP().toString());
@@ -531,6 +570,7 @@ void connectWifiIfNeeded() {
     Serial.println("STA MAC: " + WiFi.macAddress());
     drawScreen();
   } else if (!connected && reported) {
+    if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
     reported = false;
     statusLine = "WIFI DISCONNECTED";
     drawScreen();
@@ -546,6 +586,7 @@ void setup() {
   M5.Lcd.setRotation(1);
   net.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD, ZK_DEVICE_IP);
   stored.load();
+  rtcClock.begin();
   // No network write to attendance device on startup.
   connectWifiIfNeeded();
   drawScreen();
@@ -557,7 +598,15 @@ void loop() {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
       net.startAP();
-      if (net.apOn) startHttpOnce();
+      if (net.apOn) {
+        // Advertise the same friendly address in setup mode when phone/mDNS
+        // supports it. The documented 192.168.4.1 fallback always remains.
+        if (!mdnsRunning && MDNS.begin("zkclock")) {
+          MDNS.addService("http","tcp",80);
+          mdnsRunning = true;
+        }
+        startHttpOnce();
+      }
       drawScreen();
     } else if (M5.BtnB.wasPressed()) {
       screenMode = ScreenMode::CONNECT;
@@ -572,6 +621,7 @@ void loop() {
   if (screenMode == ScreenMode::SETUP) {
     if (M5.BtnB.pressedFor(2000) && !buttonBLatched) {
       buttonBLatched = true;
+      if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
       net.stopAP();
       screenMode = ScreenMode::BOOT;
       drawScreen();
@@ -579,7 +629,7 @@ void loop() {
     if (!M5.BtnB.isPressed()) buttonBLatched = false;
   } else {
     if (M5.BtnA.wasPressed()) {
-      if (stored.count) selectedPreset = (selectedPreset + 1) % stored.count;
+      selectedPreset = (selectedPreset + 1) % (stored.count + 1);
       drawScreen();
     }
     if (M5.BtnA.pressedFor(3000) && !buttonALatched) {
@@ -590,7 +640,7 @@ void loop() {
     }
     if (!M5.BtnA.isPressed()) buttonALatched = false;
 
-    if (stored.count && !buttonBLatched) {
+    if (!buttonBLatched) {
       if (!longShiftHold && M5.BtnB.pressedFor(2200)) {
         RunResult result = executeSelected(false);
         if (result == RunResult::NEED_LONG_HOLD)

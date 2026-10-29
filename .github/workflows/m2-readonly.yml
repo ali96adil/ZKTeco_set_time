@@ -2,7 +2,7 @@ name: M5StickC Plus M2 read-only build
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets]
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc]
   pull_request:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
       - name: Dry-run UI and read-only regression tests
         run: node tests/clock_ui.test.cjs
       - name: Validate Mac HTTPS gateway Python syntax
-        run: python3 -m py_compile tools/mac_live_control.py tools/clock_presets.py tools/phone_pairing.py tools/shortcut_ui.py
+        run: python3 -m py_compile tools/mac_live_control.py tools/clock_presets.py tools/phone_pairing.py tools/shortcut_ui.py tools/home_app.py
       - name: Issue short-lived local HTTPS certificates and verify SAN
         run: |
           bash tools/create_local_tls.sh 127.0.0.1
@@ -36,6 +36,10 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_m3_*.py' -v
       - name: M4 operator boot chooser and datetime-only shortcuts tests
         run: python3 -m unittest discover -s tests -p 'test_m4_contract.py' -v
+      - name: M5 Home Screen metadata and RTC availability contract
+        run: python3 -m unittest discover -s tests -p 'test_m5_home_rtc.py' -v
+      - name: Check local hostname certificate scripts
+        run: bash -n tools/prepare_home_domain.sh tools/create_local_tls.sh
       - name: Mac simulator mock and live-readonly integration tests
         run: python3 -m unittest discover -s tests -p 'test_mac_simulator.py' -v
       - name: Host ZK wire conformance and forbidden-command tests

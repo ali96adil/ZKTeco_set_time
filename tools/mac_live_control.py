@@ -26,6 +26,7 @@ from mac_simulator import dashboard_html, parse_local_datetime
 from clock_presets import ShortcutStore, target_time
 from phone_pairing import PairingStore, get_cookie, cookie_header
 from shortcut_ui import shortcut_panel
+from home_app import app_headers, manifest, png_icon
 
 BAGHDAD = ZoneInfo("Asia/Baghdad")
 MAX_BODY = 512
@@ -378,6 +379,7 @@ e('liveApply').onclick=async()=>{
 """.replace("CSRF_TOKEN_PLACEHOLDER",json.dumps(csrf_token))
         html = html.replace("</body>",script+"</body>",1)
     html = html.replace("</main>", shortcut_panel(csrf_token, enable_write) + "</main>", 1)
+    html = app_headers(html)
     return html.encode("utf-8")
 
 
@@ -472,6 +474,17 @@ document.getElementById('pair').onclick=async()=>{
             self.send_header("Content-Length",str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+            return
+        if path in ("/manifest.webmanifest", "/apple-touch-icon.png", "/favicon.ico"):
+            content = manifest() if path == "/manifest.webmanifest" else png_icon()
+            self.send_response(200)
+            self.security_headers()
+            self.send_header("Content-Type",
+                             "application/manifest+json" if path == "/manifest.webmanifest"
+                             else "image/png")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
             return
         if path=="/api/shortcuts":
             try:
