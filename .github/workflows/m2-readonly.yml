@@ -1,0 +1,40 @@
+name: M5StickC Plus M2 read-only build
+
+on:
+  push:
+    branches: [feature/m1-read-only, feature/m2-mobile-preview]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dry-run UI and read-only regression tests
+        run: node tests/clock_ui.test.cjs
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+      - name: Create placeholder config for compile-only
+        run: cp include/config.example.h include/config.h
+      - name: Build M5StickC Plus firmware
+        run: pio run -e m5stickc-plus-readonly
+      - name: Upload firmware binary for qualified review
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5stickc-plus-m2-readonly
+          path: .pio/build/m5stickc-plus-readonly/firmware.bin
+          retention-days: 7
