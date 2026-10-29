@@ -1,0 +1,16 @@
+.pio/
+.vscode/
+include/config.h
+*.bin
+*.elf
+*.map
+.DS_Store
+
+# Local HTTPS identity and browser sessions: never publish secrets.
+.secrets/
+*.key
+*.pem
+
+# M9 device-specific HTTPS private key embedded in local firmware build only
+include/m5_tls_local.h
+.secrets/m5-*

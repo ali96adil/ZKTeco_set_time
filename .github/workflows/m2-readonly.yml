@@ -1,0 +1,92 @@
+name: M5StickC Plus M2 read-only build
+
+on:
+  push:
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session, release/v1.0.0-rc1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dry-run UI and read-only regression tests
+        run: node tests/clock_ui.test.cjs
+      - name: Validate Mac HTTPS gateway Python syntax
+        run: python3 -m py_compile tools/mac_live_control.py tools/clock_presets.py tools/phone_pairing.py tools/shortcut_ui.py tools/home_app.py
+      - name: Issue short-lived local HTTPS certificates and verify SAN
+        run: |
+          bash tools/create_local_tls.sh 127.0.0.1
+          openssl verify -CAfile .secrets/ca.crt .secrets/mac.crt
+          openssl x509 -in .secrets/mac.crt -noout -ext subjectAltName
+          test ! -e .secrets/ca.key
+      - name: HTTPS authentication and CSRF rejection (local fake server)
+        run: python3 -m unittest discover -s tests -p 'test_gateway_http_security.py' -v
+      - name: HTTPS iPhone pairing and shortcuts API smoke
+        run: python3 -m unittest discover -s tests -p 'test_m3_phone_web.py' -v
+      - name: Offline Mac gateway safety and verification tests
+        run: python3 -m unittest discover -s tests -p 'test_gateway_offline.py' -v
+      - name: Offline M3 shortcuts and persistent pairing tests
+        run: python3 -m unittest discover -s tests -p 'test_m3_*.py' -v
+      - name: M4 operator boot chooser and datetime-only shortcuts tests
+        run: python3 -m unittest discover -s tests -p 'test_m4_contract.py' -v
+      - name: M6 setup screen and Wi-Fi QR layout contract
+        run: python3 -m unittest discover -s tests -p 'test_m6_display_qr.py' -v
+      - name: M7 network navigation, shortcuts and LCD sleep safety tests
+        run: python3 -m unittest discover -s tests -p 'test_m7_web_sleep.py' -v
+      - name: M8 single-page editor and physical unlock regression
+        run: python3 -m unittest discover -s tests -p 'test_m8_fast_local.py' -v
+      - name: M9 HTTPS sessions, login, no HTTP station server
+        run: python3 -m unittest discover -s tests -p 'test_m9_*.py' -v
+      - name: v1 release safeguards and endpoint regression
+        run: python3 -m unittest discover -s tests -p 'test_release_v1.py' -v
+      - name: M5 Home Screen metadata and RTC availability contract
+        run: python3 -m unittest discover -s tests -p 'test_m5_home_rtc.py' -v
+      - name: Check local hostname certificate scripts
+        run: bash -n tools/prepare_home_domain.sh tools/create_local_tls.sh
+      - name: Mac simulator mock and live-readonly integration tests
+        run: python3 -m unittest discover -s tests -p 'test_mac_simulator.py' -v
+      - name: Host ZK wire conformance and forbidden-command tests
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Iinclude tests/zk_wire_host.cpp -o /tmp/zk_wire_host
+          /tmp/zk_wire_host
+      - name: M5 physical-button encoder and date checks (offline)
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Iinclude tests/zk_write_host.cpp -o /tmp/zk_write_host
+          /tmp/zk_write_host
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+      - name: Create placeholder config for compile-only
+        run: cp include/config.example.h include/config.h
+      - name: Generate disposable CI-only M5 HTTPS trust materials
+        run: |
+          bash tools/create_m5_tls.sh
+          openssl verify -CAfile .secrets/m5-ca.crt .secrets/m5-server.crt
+          test -f include/m5_tls_local.h
+          ! git ls-files --error-unmatch include/m5_tls_local.h
+      - name: Build M5StickC Plus firmware
+        run: pio run -e m5stickc-plus-readonly
+      - name: Compile physical-button time-write code path (NO UPLOAD)
+        run: pio run -e m5stickc-plus-write-lab
+      - name: Compile M9 secure direct-command lab path (NO UPLOAD)
+        run: pio run -e m5stickc-plus-secure-write-lab
+      - name: Upload firmware binary for qualified review
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5stickc-plus-m2-readonly
+          path: .pio/build/m5stickc-plus-readonly/firmware.bin
+          retention-days: 7
