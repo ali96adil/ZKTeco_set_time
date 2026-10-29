@@ -2,7 +2,7 @@ name: M5StickC Plus M2 read-only build
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control]
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets]
   pull_request:
 
 permissions:
