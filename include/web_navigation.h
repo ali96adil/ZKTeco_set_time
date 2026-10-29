@@ -1,6 +1,20 @@
 #pragma once
 // Simple local web UI navigation, no authentication or control actions.
 #include <Arduino.h>
+inline String zkJsonEscape(const String& input) {
+  String result;
+  for (unsigned i=0; i<input.length(); ++i) {
+    const unsigned char c = input[i];
+    if (c=='\\') result += "\\\\";
+    else if (c=='"') result += "\\\"";
+    else if (c < 0x20) {
+      char code[7];
+      snprintf(code,sizeof(code),"\\u%04x",unsigned(c));
+      result += code;
+    } else result += char(c);
+  }
+  return result;
+}
 inline String zkNav() {
   return "<nav style='display:flex;gap:7px;flex-wrap:wrap;margin:0 0 14px'>"
     "<a href='/' style='padding:10px;color:white;background:#24517b;border-radius:8px'>الرئيسية</a>"
