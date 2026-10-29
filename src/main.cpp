@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <cstring>
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPWebServer.hpp>
 #include <ESPWebServerSecure.hpp>
 #include <ESPmDNS.h>
 #include <M5StickCPlus.h>
