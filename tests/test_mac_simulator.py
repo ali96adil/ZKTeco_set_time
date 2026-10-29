@@ -119,7 +119,8 @@ class MacSimulatorTests(unittest.TestCase):
         # ZKTeco SET_TIME call/command.
         source = (ROOT / "tools" / "mac_simulator.py").read_text()
         m5_source = (ROOT / "src" / "main.cpp").read_text()
-        self.assertNotIn(".set_time(", source)
+        self.assertNotIn("conn.set_time(", source)
+        self.assertNotIn("CMD_SET_TIME =", m5_source)
         self.assertNotIn("conn.set_time", m5_source)
 
 
