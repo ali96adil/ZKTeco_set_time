@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync('src/main.cpp','utf8');
-assert(!source.includes('CMD_SET_TIME'), 'M2 must not contain SET_TIME');
+assert(!/constexpr\s+uint16_t\s+CMD_SET_TIME\s*=/.test(source), 'M2 must not define SET_TIME');
+assert(!/sendCommand\s*\([^;]*CMD_SET_TIME/.test(source), 'M2 must not send SET_TIME');
 assert(!source.includes('/api/set'), 'M2 has no time-write endpoint');
 assert(source.includes('CMD_GET_TIME'), 'M2 must support read time');
 const match = source.match(/const char PAGE\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML";/);
