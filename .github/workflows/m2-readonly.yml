@@ -28,6 +28,8 @@ jobs:
           test ! -e .secrets/ca.key
       - name: HTTPS authentication and CSRF rejection (local fake server)
         run: python3 -m unittest discover -s tests -p 'test_gateway_http_security.py' -v
+      - name: HTTPS iPhone pairing and shortcuts API smoke
+        run: python3 -m unittest discover -s tests -p 'test_m3_phone_web.py' -v
       - name: Offline Mac gateway safety and verification tests
         run: python3 -m unittest discover -s tests -p 'test_gateway_offline.py' -v
       - name: Offline M3 shortcuts and persistent pairing tests
