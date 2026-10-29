@@ -77,7 +77,7 @@ Safety conditions:
 - Require PIN/session authentication, rate limit failed attempts, anti-CSRF for any write, and a **physical button on the M5Stick** pressed to authorize each write (short-lived window). An ordinary webpage alone must not be enough to set the clock.
 - Require a recent successful device read (e.g., less than 60 s old) and a recent phone time sample (e.g., under 5 s); reject stale/ambiguous data.
 - Present the old time, proposed time and signed offset; require explicit confirmation.
-- Block implausible dates, unexpected timezone offsets, giant time jumps and clock-changing requests without physical authorization; any exceptional jump needs separate deliberate override and a documented maintenance window.
+- Reject invalid calendar dates and unexpected timezone encoding. **Allow both backward and forward time corrections, including large signed offsets**, when intentionally requested by the authorized operator. For backward or large shifts, show a prominent attendance-record collision warning and require an explicit extra acknowledgement plus the normal physical confirmation; do not silently block on direction or magnitude alone. All writes still require an approved maintenance window.
 - Do not repeat set-time automatically if response is lost (avoid ambiguous double writes).
 - Read time after disconnect/reconnect and short delay. Perform two reads; compare with the reference time adjusted for passage of time, not the original fixed timestamp.
 - If verification fails, show **UNVERIFIED** and tell operator to compare the terminal display. Never mark an ACK alone as success.
@@ -85,7 +85,7 @@ Safety conditions:
 
 ## 7. Attendance integrity and deployment precautions
 
-Clock changes do **not** inherently delete old logs; however setting time backward may produce overlapping/duplicated local timestamps in **future punches**, affecting audit trails/payroll. Earlier logs retain their old timestamps and are **not** repaired by setting the clock.
+Clock changes do **not** inherently delete old logs; however setting time backward may produce overlapping/duplicated local timestamps in **future punches**, affecting audit trails/payroll. Earlier logs retain their old timestamps and are **not** repaired by setting the clock. Backward correction **must remain available** in both manual and phone-sync modes. Display its exact signed offset, collect explicit acknowledgement, record a non-PII audit event and warn the operator to avoid an active punch-in/out window. Neither a backward direction nor a large shift is itself grounds for rejection.
 
 Before first live SET_TIME:
 1. With responsible office approval, preserve backup of Windows attendance database and exported attendance events. Verify backup can be opened.
@@ -111,7 +111,7 @@ If permanently installed, use **stable USB-C power**, not the M5Stick's small ba
 - **M1:** firmware builds on M5StickC Plus, Wi-Fi provisioning, secure read-only `GET_TIME`, read diagnostics, watchdog/timeouts and unit tests with simulated ZKTeco server. Never contact production target automatically on boot.
 - **M2:** validate physical M5Stick read-only against actual terminal, including 2.4-GHz Wi-Fi route and coexistence with Windows attendance software.
 - **M3:** add authenticated mobile UI for date/time entry and phone clock, but still **DRY_RUN** by default.
-- **M4:** after explicit approved maintenance window + backup, add one-shot `SET_TIME` guarded by physical confirmation, disconnect/reconnect verification and audit log.
+- **M4:** after explicit approved maintenance window + backup, add one-shot `SET_TIME` guarded by physical confirmation, disconnect/reconnect verification and audit log. Support **backward and forward** corrections with the same verified workflow, an additional acknowledged warning for backward/large shifts and no direction-based prohibition.
 - **M5:** deploy, harden, measure drift and check attendance integrity.
 
 ## Sources
