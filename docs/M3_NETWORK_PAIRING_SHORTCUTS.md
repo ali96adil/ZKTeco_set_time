@@ -19,7 +19,7 @@ The M5 itself is still READ ONLY in this branch. No TCP time-write command has b
 
 - If station Wi-Fi is unavailable for 30 seconds, the M5 automatically starts its **WPA2-protected setup AP**.
 - Hold **Button B for about 1.8 seconds** to turn the setup AP on/off intentionally.
-- The physical M5 screen shows `ZK-Setup-XXXXXX` and an individually generated 14-character WPA2 password. The password changes when the AP is started again, and is not posted on the university network.
+- The physical M5 screen shows `ZK-Setup-XXXXXX` and an individually generated 14-character WPA2 password. The **per-device password is generated once**, saved to ESP32 NVS, and remains unchanged across reboots. Your iPhone can remember the protected setup Wi-Fi, so you do not repeatedly type its password. Keep this password private; if it becomes exposed, reset/rotate the saved AP credentials before future use.
 - Join the M5 AP from the phone and open `http://192.168.4.1/setup`. This is an AP-only configuration page, not a terminal clock-write endpoint.
 - Set SSID, optional Wi-Fi password and target ZKTeco IP; save. Return to station Wi-Fi when available.
 - **If the M5 is not connected to a network that routes to the ZKTeco terminal, the AP only permits configuration. It cannot remotely set an unreachable terminal.** The ESP32 is not magically bridged into the ZKTeco LAN.
