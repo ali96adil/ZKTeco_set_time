@@ -1,4 +1,4 @@
-// M1 READ-ONLY firmware. Intentionally DOES NOT IMPLEMENT CMD_SET_TIME (202).
+// M5 safe default: read-only firmware. Time-write laboratory path requires explicit build flag.
 // Target board: M5StickC Plus (original) + ESP32 Arduino.
 // No users, attendance records, biometric data or admin credentials accessed.
 #include <Arduino.h>
@@ -269,6 +269,11 @@ const char PAGE[] PROGMEM = R"HTML(
 <!doctype html><html lang="ar" dir="rtl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ZK Clock">
+<meta name="theme-color" content="#0c1725">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
 <title>ZKTeco Clock — M2 Preview</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,Tahoma,Arial,sans-serif}
@@ -492,6 +497,23 @@ void startHttpOnce() {
   net.attachRoutes(server);
   stored.routes(server, net);
   rtcClock.routes(server, net);
+  server.on("/manifest.webmanifest", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200,"application/manifest+json",
+      "{\"name\":\"ZKTeco M5 Clock\",\"short_name\":\"ZK M5\","
+      "\"start_url\":\"/\",\"display\":\"standalone\","
+      "\"theme_color\":\"#0c1725\",\"background_color\":\"#0c1725\","
+      "\"icons\":[{\"src\":\"/icon.svg\",\"sizes\":\"any\","
+      "\"type\":\"image/svg+xml\"}]}");
+  });
+  server.on("/icon.svg", HTTP_GET, []() {
+    server.send(200,"image/svg+xml",
+      "<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'"
+      " viewBox='0 0 180 180'><rect width='180' height='180' rx='32'"
+      " fill='#0c1725'/><circle cx='90' cy='90' r='62' fill='#2376cf'/>"
+      "<path d='M90 48v43h33' stroke='white' stroke-width='11'"
+      " stroke-linecap='round' fill='none'/></svg>");
+  });
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html; charset=utf-8", PAGE);
