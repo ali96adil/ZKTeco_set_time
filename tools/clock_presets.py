@@ -11,7 +11,7 @@ import threading
 
 MAX_PRESETS = 12
 MAX_NAME_LEN = 32
-ALLOWED_KINDS = {"datetime", "date", "time", "phone"}
+ALLOWED_KINDS = {"datetime", "phone"}
 
 
 def validate_shortcut(item: dict) -> dict:
@@ -28,18 +28,6 @@ def validate_shortcut(item: dict) -> dict:
         raise ValueError("Invalid shortcut kind/value")
     if kind == "phone" and value != "":
         raise ValueError("Phone shortcut value must be empty")
-    if kind == "date":
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-            raise ValueError("Invalid date")
-        dt = datetime.strptime(value, "%Y-%m-%d")
-        if dt.strftime("%Y-%m-%d") != value:
-            raise ValueError("Invalid date")
-        if not 2000 <= dt.year <= 2099:
-            raise ValueError("Date outside supported range")
-    if kind == "time":
-        if not re.fullmatch(r"\d{2}:\d{2}:\d{2}", value):
-            raise ValueError("Invalid time")
-        datetime.strptime(value, "%H:%M:%S")
     if kind == "datetime":
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", value):
             raise ValueError("Invalid datetime")
@@ -56,12 +44,6 @@ def target_time(shortcut: dict, device_now: datetime, phone_now: datetime) -> da
         return phone_now.replace(microsecond=0)
     if kind == "datetime":
         return datetime.fromisoformat(value)
-    if kind == "date":
-        return datetime.fromisoformat(value).replace(
-            hour=device_now.hour, minute=device_now.minute, second=device_now.second)
-    if kind == "time":
-        hour, minute, second = map(int, value.split(":"))
-        return device_now.replace(hour=hour, minute=minute, second=second)
     raise ValueError("Unsupported shortcut")
 
 
