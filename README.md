@@ -27,6 +27,24 @@ The M5StickC Plus only uses 2.4 GHz Wi-Fi. For an OPEN WLAN with MikroTik Hotspo
 
 The terminal is set by an unencrypted SDK protocol with communication key 0 on the previously tested Mac link. Protect the network and review the router ACL with IT.
 
+## Run a no-hardware Mac simulation first
+
+This project now includes a **Mac simulator that serves the same embedded M5 mobile dashboard**. It defaults to a virtual clock, with absolutely no ZKTeco network connection:
+
+\`\`\`bash
+python3 tools/mac_simulator.py --mode mock --offset-seconds 152
+\`\`\`
+
+Open **http://127.0.0.1:8765/** in the Mac browser. Try phone-time synchronization, manual forward/backward previews, and the **SIMULATED APPLY** button (it changes only an in-memory fake clock). No ESP32 or attendance terminal is required.
+
+Optionally read the real terminal's clock **without setting it** from the Mac that previously connected via pyzk:
+
+\`\`\`bash
+~/zkteco-clock/.venv/bin/python tools/mac_simulator.py --mode live-readonly
+\`\`\`
+
+The real-read mode has **no write route**. See [MAC_SIMULATOR.md](docs/MAC_SIMULATOR.md) for details and network restrictions.
+
 ## Build on macOS (first, no flashing)
 
 \`\`\`bash
