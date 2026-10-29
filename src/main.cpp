@@ -890,7 +890,16 @@ void loop() {
     delay(15);
     return;
   }
-  if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed()) comboLatched=false;
+  // After combined A+B authorization, consume BOTH button releases.
+  // Releasing just A while still holding B must never trigger a clock write.
+  if (comboLatched) {
+    if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
+      comboLatched=false;
+    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
+      server.handleClient();
+    delay(15);
+    return;
+  }
   if (screenMode == ScreenMode::BOOT) {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
