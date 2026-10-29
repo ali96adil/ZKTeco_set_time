@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 import secrets
 import ssl
 import threading
@@ -22,6 +23,9 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from mac_simulator import dashboard_html, parse_local_datetime
+from clock_presets import ShortcutStore, target_time
+from phone_pairing import PairingStore, get_cookie, cookie_header
+from shortcut_ui import shortcut_panel
 
 BAGHDAD = ZoneInfo("Asia/Baghdad")
 MAX_BODY = 512
@@ -85,15 +89,23 @@ class Gateway(ThreadingHTTPServer):
 
     def __init__(self, addr: tuple[str, int], *, device_host: str,
                  device_port: int, password: str, enable_write: bool,
-                 reader=None, setter=None):
+                 reader=None, setter=None, shortcut_path=None,
+                 pairing_path=None, allow_pairing=False, allow_basic=True):
         self.device_host = device_host
         self.device_port = device_port
         self.password = password
+        self.allow_basic = allow_basic
         self.csrf_token = secrets.token_urlsafe(32)
         self.enable_write = enable_write
         self.reader = reader or (lambda: read_real_clock(device_host, device_port))
         self.setter = setter or (lambda dt: set_real_clock_once(device_host, device_port, dt))
         self.lock = threading.RLock()
+        self.shortcuts = ShortcutStore(Path(shortcut_path or ".secrets/shortcuts.json"))
+        self.pairing = PairingStore(
+            Path(pairing_path or ".secrets/paired_phones.json"),
+            allow_new=allow_pairing,
+        )
+        self.last_quick = 0.0
         self.pending: PendingChange | None = None
         self.page = build_live_page(self.csrf_token, enable_write)
         super().__init__(addr, Handler)
@@ -218,6 +230,64 @@ class Gateway(ThreadingHTTPServer):
             }
 
 
+    def quick(self, doc: dict) -> dict:
+        """One paired-phone action, one SDK command, one independent verification.
+
+        No repeated confirmation dialogues and no auto-retry on ambiguous ACK.
+        """
+        with self.lock:
+            if not self.enable_write:
+                raise PermissionError("Clock writes not enabled")
+            if not isinstance(doc, dict) or set(doc) != {"id", "client_epoch_ms"}:
+                raise ValueError("Invalid shortcut invocation")
+            now = time.monotonic()
+            if self.last_quick and now - self.last_quick < 8.0:
+                raise ValueError("Wait before another clock action")
+            self.last_quick = now
+            item = next((x for x in self.shortcuts.list()
+                         if x["id"] == doc["id"]), None)
+            if item is None:
+                raise ValueError("Unknown shortcut")
+            old = self.reader()
+            # The clicked phone epoch is an instant, not an offset cached at page load.
+            client_epoch = doc["client_epoch_ms"]
+            if item["kind"] == "phone":
+                proposed = baghdad_naive_from_epoch_ms(client_epoch)
+            else:
+                proposed = target_time(item, old, old)
+            delta = (proposed - old).total_seconds()
+            # Large shifts are dangerous to production attendance timelines.
+            # Use the existing manual prepare/confirm flow for >24h corrections.
+            if abs(delta) > 86400:
+                raise ValueError("Large time change requires manual confirmation")
+            before = time.monotonic()
+            write_error = None
+            try:
+                self.setter(proposed)
+            except Exception as exc:
+                write_error = type(exc).__name__
+            time.sleep(0.8)
+            try:
+                observed = self.reader()  # fresh connection, never same-session ACK
+                expected = proposed + timedelta(seconds=time.monotonic() - before)
+                error_seconds = round((observed - expected).total_seconds(), 2)
+                verified = write_error is None and abs(error_seconds) <= VERIFY_TOLERANCE
+                result_time = observed.strftime("%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                error_seconds = None
+                verified = False
+                result_time = None
+            print("QUICK_CLOCK_CHANGE id=%s delta_seconds=%d verified=%s write_error=%s" %
+                  (item["id"], int(round(delta)), verified, write_error), flush=True)
+            return {
+                "ok": True, "status": "VERIFIED" if verified else "UNVERIFIED",
+                "id": item["id"], "name": item["name"],
+                "requested_time": proposed.strftime("%Y-%m-%dT%H:%M:%S"),
+                "result_time": result_time, "error_seconds": error_seconds,
+                "write_error": write_error,
+            }
+
+
 def build_live_page(csrf_token: str, enable_write: bool) -> bytes:
     html = dashboard_html()
     html = html.replace("نسخة M2 تجريبية: قراءة حقيقية ومعاينة التصحيح فقط. <b>لا تحتوي أي أمر لتغيير الساعة.</b>",
@@ -307,6 +377,7 @@ e('liveApply').onclick=async()=>{
 </script>
 """.replace("CSRF_TOKEN_PLACEHOLDER",json.dumps(csrf_token))
         html = html.replace("</body>",script+"</body>",1)
+    html = html.replace("</main>", shortcut_panel(csrf_token, enable_write) + "</main>", 1)
     return html.encode("utf-8")
 
 
@@ -337,6 +408,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def authorized(self) -> bool:
         authorization = self.headers.get("Authorization","")
+        cookie = get_cookie(self.headers.get("Cookie", ""))
+        if self.server.pairing.authorized(cookie):
+            return True
+        if not self.server.allow_basic:
+            return False
         if not authorization.startswith("Basic "):
             return False
         try:
@@ -356,8 +432,38 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
-        if not self.require_auth():return
         path = urlsplit(self.path).path
+        if path == "/" and not self.authorized() and self.server.pairing.allow_new:
+            page = """<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>إقران الهاتف</title></head>
+<body style='font:18px system-ui;background:#152438;color:white;padding:20px;max-width:420px;margin:auto'>
+<h2>إقران هذا الهاتف مرة واحدة</h2>
+<p>أدخل الرمز المعروض على Terminal الماك. Safari راح يتذكر الهاتف لمدة 30 يوم بدون كلمة مرور يومية.</p>
+<input id='pairCode' inputmode='numeric' maxlength='8' placeholder='رمز الإقران'
+ style='padding:14px;font:inherit;width:90%'>
+<button id='pair' style='display:block;margin:14px 0;padding:14px;font:inherit'>إقران الهاتف</button>
+<p id='status'></p><script>
+document.getElementById('pair').onclick=async()=>{
+ const code=document.getElementById('pairCode').value;
+ try{
+  const r=await fetch('/api/pair',{method:'POST',
+    headers:{'Content-Type':'application/json'},credentials:'same-origin',
+    body:JSON.stringify({code})});
+  const j=await r.json();
+  if(!r.ok)throw Error(j.error||'Pairing refused');
+  location.replace('/');
+ }catch(e){document.getElementById('status').textContent=e.message;}
+};
+</script></body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.security_headers()
+            self.send_header("Content-Type","text/html; charset=utf-8")
+            self.send_header("Content-Length",str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+            return
+        if not self.require_auth():return
         if path=="/":
             payload=self.server.page
             self.send_response(200)
@@ -366,6 +472,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length",str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+            return
+        if path=="/api/shortcuts":
+            try:
+                self.reply(200,{"ok":True,"items":self.server.shortcuts.list()})
+            except Exception as exc:
+                self.reply(503,{"ok":False,"error":"Cannot read shortcuts: "+
+                                type(exc).__name__})
             return
         if path=="/api/read":
             try:
@@ -379,32 +492,74 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404,{"ok":False,"error":"Not found"})
 
     def do_POST(self) -> None:
-        if not self.require_auth():return
         path = urlsplit(self.path).path
-        if path not in ("/api/prepare","/api/apply") or not self.server.enable_write:
+        # Pairing is the only unauthenticated POST. One-time 8-digit code is
+        # shown on Mac console, 5 failed tries maximum, HTTPS mandatory.
+        if path == "/api/pair":
+            host=self.headers.get("Host","")
+            origin=self.headers.get("Origin","")
+            if not host or origin != "https://"+host:
+                self.reply(403,{"ok":False,"error":"Pairing origin rejected"});return
+            length=self.headers.get("Content-Length","")
+            if (self.headers.get("Content-Type","").split(";")[0].strip()!="application/json"
+                or not length.isdigit() or not 0 < int(length) <= 128):
+                self.reply(400,{"ok":False,"error":"Invalid pairing request"});return
+            try:
+                doc=json.loads(self.rfile.read(int(length)))
+                if not isinstance(doc,dict) or set(doc)!={"code"}:
+                    raise ValueError("Invalid pairing shape")
+                token=self.server.pairing.pair(doc["code"])
+            except (ValueError, OSError):
+                self.reply(403,{"ok":False,"error":"Invalid/expired pairing code"});return
+            payload=b'{"ok":true}'
+            self.send_response(200)
+            self.security_headers()
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(payload)))
+            self.send_header("Set-Cookie",cookie_header(token))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        if not self.require_auth():return
+        if path not in ("/api/shortcuts","/api/quick","/api/prepare","/api/apply"):
+            self.reply(404,{"ok":False,"error":"Unknown operation"});return
+        if path != "/api/shortcuts" and not self.server.enable_write:
             self.reply(404,{"ok":False,"error":"Live write unavailable"});return
-        # Browser same-origin and random CSRF header; Basic auth alone is
-        # insufficient to prevent a forged request from another website.
-        host = self.headers.get("Host","")
-        origin = self.headers.get("Origin","")
+        host=self.headers.get("Host","")
+        origin=self.headers.get("Origin","")
         if not host or origin != "https://"+host or \
            not secrets.compare_digest(self.headers.get("X-CSRF-Token",""),
                                       self.server.csrf_token):
             self.reply(403,{"ok":False,"error":"Origin/CSRF check failed"});return
         if self.headers.get("Content-Type","").split(";")[0].strip() != "application/json":
             self.reply(415,{"ok":False,"error":"Expected JSON"});return
-        length = self.headers.get("Content-Length","")
+        length=self.headers.get("Content-Length","")
         if not length.isdigit() or not 0 < int(length) <= MAX_BODY:
-            self.reply(413,{"ok":False,"error":"Invalid body size"});return
+            # Shortcut catalogs are limited to 12 entries; separate 4 KiB cap.
+            if path != "/api/shortcuts" or not length.isdigit() or not 0 < int(length) <= 4096:
+                self.reply(413,{"ok":False,"error":"Invalid body size"});return
         try:
-            obj=json.loads(self.rfile.read(int(length)))
-            if not isinstance(obj,dict):raise ValueError("JSON object required")
-            value=(self.server.prepare(obj) if path=="/api/prepare"
-                   else self.server.apply(obj))
-            self.reply(200,value)
+            doc=json.loads(self.rfile.read(int(length)))
+            if not isinstance(doc,dict):raise ValueError("JSON object required")
+            if path=="/api/shortcuts":
+                if set(doc)!={"items"}:raise ValueError("Invalid shortcut save")
+                self.server.shortcuts.save(doc["items"])
+                result={"ok":True,"items":self.server.shortcuts.list()}
+            elif path=="/api/quick":
+                result=self.server.quick(doc)
+            elif path=="/api/prepare":
+                result=self.server.prepare(doc)
+            else:
+                result=self.server.apply(doc)
+            self.reply(200,result)
         except PermissionError:
             self.reply(403,{"ok":False,"error":"Write disabled"})
-        except (ValueError,OverflowError,OSError):
+        except ValueError as exc:
+            message = (str(exc) if path in ("/api/quick", "/api/shortcuts")
+                       else "Invalid or expired request")
+            self.reply(400,{"ok":False,"error":message})
+        except (OverflowError,OSError):
             self.reply(400,{"ok":False,"error":"Invalid or expired request"})
         except Exception as exc:
             self.reply(503,{"ok":False,"error":"Operation not confirmed: "+
@@ -419,13 +574,19 @@ def main() -> None:
     parser.add_argument("--device-port",type=int,default=4370)
     parser.add_argument("--cert",required=True,help="Local TLS certificate PEM")
     parser.add_argument("--key",required=True,help="Local TLS private key PEM")
+    parser.add_argument("--paired-only",action="store_true",
+                        help="Disable rotating Basic password; trust paired Safari only")
+    parser.add_argument("--enable-pairing",action="store_true",
+                        help="Show one-time phone pairing code for 5 minutes")
     parser.add_argument("--enable-write",action="store_true",
                         help="Explicitly permit live SET_TIME after authenticated confirmation")
     args=parser.parse_args()
     password=secrets.token_urlsafe(22)
     gateway=Gateway((args.bind,args.port),device_host=args.device_host,
                     device_port=args.device_port,password=password,
-                    enable_write=args.enable_write)
+                    enable_write=args.enable_write,
+                    allow_pairing=args.enable_pairing,
+                    allow_basic=not args.paired_only)
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version=ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=args.cert,keyfile=args.key)
@@ -434,8 +595,14 @@ def main() -> None:
     print("Mode:", "LIVE CLOCK WRITES ENABLED" if args.enable_write
           else "READ ONLY",flush=True)
     print(f"URL: https://{args.bind}:{args.port}/",flush=True)
-    print("Login user: operator")
-    print("Temporary password:",password,flush=True)
+    if gateway.pairing.code:
+        print("PAIR THIS PHONE ONLY ONCE (valid 5 minutes):",gateway.pairing.code,
+              flush=True)
+    if args.paired_only:
+        print("AUTH: paired iPhone sessions only; no rotating login password.")
+    else:
+        print("Login user (fallback): operator")
+        print("Temporary password:",password,flush=True)
     print("Do not publish or share this password. Stop with Ctrl+C.",flush=True)
     try:
         gateway.serve_forever(poll_interval=0.1)

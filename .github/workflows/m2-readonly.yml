@@ -2,7 +2,7 @@ name: M5StickC Plus M2 read-only build
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control]
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets]
   pull_request:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
       - name: Dry-run UI and read-only regression tests
         run: node tests/clock_ui.test.cjs
       - name: Validate Mac HTTPS gateway Python syntax
-        run: python3 -m py_compile tools/mac_live_control.py
+        run: python3 -m py_compile tools/mac_live_control.py tools/clock_presets.py tools/phone_pairing.py tools/shortcut_ui.py
       - name: Issue short-lived local HTTPS certificates and verify SAN
         run: |
           bash tools/create_local_tls.sh 127.0.0.1
@@ -28,8 +28,12 @@ jobs:
           test ! -e .secrets/ca.key
       - name: HTTPS authentication and CSRF rejection (local fake server)
         run: python3 -m unittest discover -s tests -p 'test_gateway_http_security.py' -v
+      - name: HTTPS iPhone pairing and shortcuts API smoke
+        run: python3 -m unittest discover -s tests -p 'test_m3_phone_web.py' -v
       - name: Offline Mac gateway safety and verification tests
         run: python3 -m unittest discover -s tests -p 'test_gateway_offline.py' -v
+      - name: Offline M3 shortcuts and persistent pairing tests
+        run: python3 -m unittest discover -s tests -p 'test_m3_*.py' -v
       - name: Mac simulator mock and live-readonly integration tests
         run: python3 -m unittest discover -s tests -p 'test_mac_simulator.py' -v
       - name: Host ZK wire conformance and forbidden-command tests
