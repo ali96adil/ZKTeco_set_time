@@ -1,10 +1,11 @@
 // M5 safe default: read-only firmware. Time-write laboratory path requires explicit build flag.
 // Target board: M5StickC Plus (original) + ESP32 Arduino.
-// No users, attendance records, biometric data or admin credentials accessed.
+// No staff/biometric/attendance records accessed. Admin login credentials are hashed locally.
 #include <Arduino.h>
 #include <cstring>
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPWebServer.hpp>
+#include <ESPWebServerSecure.hpp>
 #include <ESPmDNS.h>
 #include <M5StickCPlus.h>
 #include <qrcode.h>
@@ -17,6 +18,10 @@
 #include "web_navigation.h"
 #include "local_arm.h"
 #include "m8_mobile_ui.h"
+#include "m9_secure_ui.h"
+#include "m9_login_ui.h"
+#include "m5_tls_local.h"
+#include "zk_sessions.h"
 #ifndef ZK_ENABLE_M5_TIME_WRITE
 #define ZK_ENABLE_M5_TIME_WRITE 0
 #endif
@@ -29,7 +34,11 @@ constexpr uint16_t CMD_ACK_OK = zkwire::kAckOk;
 constexpr uint16_t CMD_ACK_UNAUTH = zkwire::kAckUnauth;
 constexpr size_t MAX_PACKET_BODY = zkwire::kMaxBody;
 constexpr uint32_t TIMEOUT_MS = 5000;
-WebServer server(80);
+WebServer server(80); // Private WPA2 setup AP only
+ESPWebServerSecure secureServer(443); // Station HTTPS only
+ZkSessions sessions;
+bool secureStarted=false;
+String csrfToken;
 NetworkSetup net;
 M5Presets stored;
 M5Clock rtcClock;
@@ -51,6 +60,7 @@ uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
 bool serverStarted = false;
+bool setupRoutesRegistered = false;
 
 bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   const uint32_t start = millis();
@@ -574,7 +584,7 @@ void drawScreen() {
   M5.Lcd.drawString("ZKTeco CLOCK",7,3,2);
   M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ? "WIFI CONNECTED" : "CONNECTING...",7,23,2);
   if (WiFi.status()==WL_CONNECTED)
-    M5.Lcd.drawString("zkclock.local",7,43,2);
+    M5.Lcd.drawString("https://zkclock.local",7,43,1);
   stored.load();
   if (selectedPreset > stored.count) selectedPreset = 0;
   M5.Lcd.drawString(String(selectedPreset + 1) + "/" + String(stored.count+1),7,63,2);
@@ -592,7 +602,8 @@ void drawScreen() {
 }
 
 void startHttpOnce() {
-  if (serverStarted) return;
+  if(serverStarted)return;
+  if(setupRoutesRegistered){server.begin();serverStarted=true;return;}
   net.attachRoutes(server, screenIdle);
   stored.routes(server, net);
   rtcClock.routes(server, net);
@@ -798,10 +809,271 @@ void startHttpOnce() {
   server.onNotFound([]() {
     server.send(404, "text/plain", "Not found. Read-only endpoints only.");
   });
+  // Initial credential enrollment and credential recovery are local-only,
+  // available from the physically selected WPA2 setup AP. They are never
+  // exposed over campus Wi-Fi nor served by the HTTPS login endpoint.
+  server.on("/auth/setup",HTTP_GET,[](){
+    if (!net.setupClient(server)) {
+      server.send(403,"text/plain","Requires protected M5 setup WiFi");return;
+    }
+    String page=zkPageBegin("تعيين حساب ZK Clock");
+    page+="<p>حساب الجهاز ثابت ويشتغل على HTTPS. تقدر تختار "
+      "المستخدم والباسورد مرة واحدة، وSafari راح يتذكر الجلسة.</p>"
+      "<p>إعدادات الدخول تتغير هنا فقط، على شبكة M5 المحمية.</p>"
+      "<form method='post' action='/auth/setup'>"
+      "<label>المستخدم</label><input name='user' value='operator'"
+      " minlength='3' maxlength='24' autocomplete='username' required>"
+      "<label>كلمة مرور ثابتة (12 حرف على الأقل)</label>"
+      "<input type='password' name='pass' minlength='12' maxlength='96'"
+      " autocomplete='new-password' required>"
+      "<button type='submit'>حفظ الحساب وإلغاء الجلسات السابقة</button></form>"
+      "<p>قبل دخول HTTPS، ثبت شهادة الثقة المحلية المنشأة على الماك "
+      "للـM5. لا تتجاوز تحذير الشهادة.</p>";
+    page+=zkPageEnd();
+    server.sendHeader("Cache-Control","no-store");
+    server.send(200,"text/html; charset=utf-8",page);
+  });
+  server.on("/auth/setup",HTTP_POST,[](){
+    if(!net.setupClient(server)){
+      server.send(403,"text/plain","Requires protected setup WiFi");return;
+    }
+    if(!sessions.configure(server.arg("user"),server.arg("pass"))){
+      server.send(400,"text/plain","Invalid user/password or could not save");
+      return;
+    }
+    String page=zkPageBegin("الحساب محفوظ");
+    page+="<p>انحفظ الحساب على M5 وانلغت كل جلسات الأجهزة القديمة. "
+      "اختار CONNECT على الجهاز، ثم افتح https://zkclock.local/ "
+      "من الآيفون بعد تثبيت شهادة الثقة.</p>";
+    page+=zkPageEnd();
+    server.send(200,"text/html; charset=utf-8",page);
+  });
   const char* m8Headers[]={"X-ZK-Edit"};
   server.collectHeaders(m8Headers,1);
   server.begin();
+  setupRoutesRegistered = true;
   serverStarted = true;
+}
+
+
+bool allowedHttps() {
+  if (!sessions.allowedCookie(secureServer.header("Cookie"))) {
+    secureServer.sendHeader("Cache-Control","no-store");
+    secureServer.send(401,"application/json",
+      "{\"ok\":false,\"error\":\"سجل دخول عبر HTTPS أولاً\"}");
+    return false;
+  }
+  const String bearer=ZkSessions::parseCookie(secureServer.header("Cookie"));
+  secureServer.sendHeader("Set-Cookie",ZkSessions::issueCookie(bearer));
+  secureServer.sendHeader("Cache-Control","no-store");
+  secureServer.sendHeader("X-Content-Type-Options","nosniff");
+  return true;
+}
+bool allowedMutation() {
+  if (!allowedHttps()) return false;
+  if (secureServer.header("Origin")!="https://zkclock.local" ||
+      secureServer.header("X-ZK-CSRF")!=csrfToken ||
+      secureServer.header("Content-Type").indexOf("application/x-www-form-urlencoded")!=0) {
+    secureServer.send(403,"application/json",
+      "{\"ok\":false,\"error\":\"فشل حماية الطلب؛ افتح رابط HTTPS الصحيح\"}");
+    return false;
+  }
+  return true;
+}
+void secureJson(int status,const String& value) {
+  secureServer.sendHeader("Cache-Control","no-store");
+  secureServer.send(status,"application/json; charset=utf-8",value);
+}
+bool copyM9Presets(M5Preset* proposal,uint8_t& length) {
+  length=0;
+  for(uint8_t i=0;i<M5Presets::kMax;++i) {
+    String name=secureServer.arg("n"+String(i));
+    String when=secureServer.arg("v"+String(i));
+    name.trim();when.trim();
+    if (name.length()==0 && when.length()==0) continue;
+    if (when.length()==16) when+=":00";
+    if(name.length()<1 || name.length()>24 || name.indexOf('|')>=0 ||
+       !M5Presets::validDateTime(when))return false;
+    proposal[length++]={name,when};
+  }
+  return true;
+}
+
+void initSecureRoutes() {
+  secureServer.on("/login",HTTP_GET,[](){
+    secureServer.sendHeader("Cache-Control","no-store");
+    secureServer.send_P(200,"text/html; charset=utf-8",M9_LOGIN);
+  });
+  secureServer.on("/auth/login",HTTP_POST,[](){
+    if(secureServer.header("Origin")!="https://zkclock.local" ||
+       secureServer.header("Content-Type").indexOf("application/x-www-form-urlencoded")!=0) {
+      secureJson(403,"{\"ok\":false,\"error\":\"عنوان غير موثوق\"}");
+      return;
+    }
+    const String bearer=sessions.login(secureServer.arg("user"),secureServer.arg("password"));
+    if(bearer.length()!=64) {
+      secureJson(403,"{\"ok\":false,\"error\":\"بيانات الدخول غير صحيحة أو محاولة كثيرة\"}");
+      return;
+    }
+    secureServer.sendHeader("Set-Cookie",ZkSessions::issueCookie(bearer));
+    secureJson(200,"{\"ok\":true}");
+  });
+  secureServer.on("/",HTTP_GET,[](){
+    if (!sessions.allowedCookie(secureServer.header("Cookie"))) {
+      secureServer.sendHeader("Location","/login");
+      secureServer.send(302,"text/plain","");
+      return;
+    }
+    secureServer.sendHeader("Set-Cookie",ZkSessions::issueCookie(
+      ZkSessions::parseCookie(secureServer.header("Cookie"))));
+    secureServer.sendHeader("Cache-Control","no-store");
+    secureServer.send_P(200,"text/html; charset=utf-8",M9_HOME);
+  });
+  secureServer.on("/api/m9",HTTP_GET,[](){
+    if(!allowedHttps())return;
+    stored.load();
+    zkwire::CivilTime current;
+    bool ready=rtcClock.trustworthy(current);
+    String result="{\"ok\":true,\"authenticated\":true,\"csrf\":\""+
+      csrfToken+"\",\"write_enabled\":"+
+      String(ZK_ENABLE_M5_TIME_WRITE ? "true" : "false")+
+      ",\"ssid\":\""+zkJsonEscape(net.ssid)+
+      "\",\"zk_ip\":\""+zkJsonEscape(net.zkIp)+
+      "\",\"ap_name\":\""+zkJsonEscape(net.currentApName())+
+      "\",\"idle\":"+String(screenIdle.timeout())+
+      ",\"rtc_ready\":"+String(ready?"true":"false")+
+      ",\"rtc_time\":\""+(ready?zkJsonEscape(M5Clock::asString(current)):String(""))+
+      "\",\"items\":[";
+    for(uint8_t i=0;i<stored.count;++i){
+      if(i)result+=",";
+      result+="{\"name\":\""+zkJsonEscape(stored.items[i].name)+
+        "\",\"datetime\":\""+zkJsonEscape(stored.items[i].datetime)+"\"}";
+    }
+    result+="]}";
+    secureJson(200,result);
+  });
+  secureServer.on("/api/m9/read",HTTP_GET,[](){
+    if(!allowedHttps())return;
+    if(lastHttpRead && millis()-lastHttpRead < 8000) {
+      secureJson(429,"{\"ok\":false,\"error\":\"أعد القراءة بعد ثوان\"}");return;
+    }
+    lastHttpRead=millis();
+    String clock,error;
+    uint32_t duration=0;
+    if(!readDeviceClock(clock,error,duration)) {
+      secureJson(503,"{\"ok\":false,\"error\":\"جهاز البصمة غير متصل\"}");
+      return;
+    }
+    lastClock=clock;
+    secureJson(200,"{\"ok\":true,\"device_time\":\""+clock+
+      "\",\"duration_ms\":"+String(duration)+"}");
+  });
+  secureServer.on("/api/m9/save",HTTP_POST,[](){
+    if(!allowedMutation())return;
+    const String action=secureServer.arg("action");
+    if(action=="presets"){
+      M5Preset proposal[M5Presets::kMax];
+      uint8_t length=0;
+      if(!copyM9Presets(proposal,length) || !stored.save(proposal,length)) {
+        secureJson(400,"{\"ok\":false,\"error\":\"اختصار غير صالح\"}");return;
+      }
+      if(selectedPreset>stored.count)selectedPreset=stored.count;
+      statusLine="PRESETS SAVED";
+      drawScreen();
+      secureJson(200,"{\"ok\":true,\"message\":\"تم حفظ الأوامر\"}");
+    } else if(action=="settings"){
+      const String name=secureServer.arg("apname");
+      const String idleText=secureServer.arg("idle");
+      bool validName=name.length()>=4 && name.length()<=24;
+      for(unsigned i=0;i<name.length();++i) {
+        char c=name[i];
+        if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+             (c>='0'&&c<='9')||c=='-'||c=='_'))validName=false;
+      }
+      uint16_t timeout=65535;
+      if(idleText=="0")timeout=0;
+      else if(idleText=="15")timeout=15;
+      else if(idleText=="30")timeout=30;
+      else if(idleText=="60")timeout=60;
+      else if(idleText=="120")timeout=120;
+      if(!validName||!ScreenIdle::valid(timeout)){
+        secureJson(400,"{\"ok\":false,\"error\":\"تحقق من اسم الشبكة أو النوم\"}");return;
+      }
+      Preferences p;
+      if(!p.begin("zk-net",false)){
+        secureJson(503,"{\"ok\":false,\"error\":\"فشل التخزين\"}");return;
+      }
+      size_t written=p.putString("apname",name);
+      p.end();
+      if(!written || !screenIdle.save(timeout)){
+        secureJson(503,"{\"ok\":false,\"error\":\"فشل حفظ الإعدادات\"}");return;
+      }
+      net.savedApName=name;
+      secureJson(200,"{\"ok\":true,\"message\":\"انحفظت الإعدادات\"}");
+    } else secureJson(400,"{\"ok\":false,\"error\":\"عملية غير معروفة\"}");
+  });
+  secureServer.on("/api/m9/rtc",HTTP_POST,[](){
+    if(!allowedMutation())return;
+    if(!rtcClock.setFromPhone(secureServer.arg("datetime"))) {
+      secureJson(400,"{\"ok\":false,\"error\":\"فشلت معايرة RTC\"}");return;
+    }
+    secureJson(200,"{\"ok\":true,\"message\":\"تمت معايرة ساعة M5\"}");
+  });
+  secureServer.on("/api/m9/run",HTTP_POST,[](){
+    if(!allowedMutation())return;
+    stored.load();
+    String raw=secureServer.arg("index");
+    if(raw.length()<1||raw.length()>2){
+      secureJson(400,"{\"ok\":false,\"error\":\"رقم غير صالح\"}");return;
+    }
+    for(unsigned i=0;i<raw.length();++i)if(raw[i]<'0'||raw[i]>'9'){
+      secureJson(400,"{\"ok\":false,\"error\":\"رقم غير صالح\"}");return;
+    }
+    int index=raw.toInt();
+    if(index>stored.count) {
+      secureJson(400,"{\"ok\":false,\"error\":\"الاختصار غير موجود\"}");return;
+    }
+#if ZK_ENABLE_M5_TIME_WRITE
+    selectedPreset=index;
+    const bool large=secureServer.arg("confirm")=="large";
+    RunResult result=executeSelected(large);
+    if(result==RunResult::NEED_LONG_HOLD) {
+      secureJson(200,"{\"ok\":true,\"requires_large_confirmation\":true,"
+        "\"message\":\"فرق أكبر من 24 ساعة؛ يحتاج تأكيد\"}");return;
+    }
+    if(result==RunResult::COMPLETED) {
+      secureJson(200,"{\"ok\":true,\"verified\":true,"
+        "\"message\":\"تم تعديل ساعة البصمة والتحقق منها\"}");
+    } else {
+      secureJson(503,"{\"ok\":false,\"verified\":false,"
+        "\"error\":\"لم تتأكد النتيجة؛ افحص شاشة البصمة قبل المحاولة من جديد\"}");
+    }
+#else
+    secureJson(403,"{\"ok\":false,\"error\":\"نسخة القراءة فقط؛ تنفيذ الوقت يحتاج اختبار النسخة المؤهلة\"}");
+#endif
+  });
+  secureServer.on("/api/m9/revoke",HTTP_POST,[](){
+    if(!allowedMutation())return;
+    if(!sessions.revokeAll()) {
+      secureJson(503,"{\"ok\":false,\"error\":\"تعذر إلغاء الجلسات\"}");return;
+    }
+    secureServer.sendHeader("Set-Cookie",ZkSessions::expireCookie());
+    secureJson(200,"{\"ok\":true}");
+  });
+  secureServer.onNotFound([](){
+    secureServer.send(404,"text/plain","Not found");
+  });
+  secureServer.setServerKeyAndCert(kM5TlsServerKey,sizeof(kM5TlsServerKey),
+                                    kM5TlsServerCert,sizeof(kM5TlsServerCert));
+}
+void secureServiceTick() {
+  if(screenMode!=ScreenMode::CONNECT)return;
+  if(WiFi.status()!=WL_CONNECTED) {
+    if(secureStarted) {secureServer.close();secureStarted=false;}
+    return;
+  }
+  if(!secureStarted) {secureServer.begin();secureStarted=true;}
+  secureServer.handleClient();
 }
 
 void connectWifiIfNeeded() {
@@ -810,9 +1082,9 @@ void connectWifiIfNeeded() {
   const bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !reported) {
     if (!mdnsRunning && MDNS.begin("zkclock")) {
-      MDNS.addService("http", "tcp", 80);
+      MDNS.addService("https", "tcp", 443);
       mdnsRunning = true;
-      Serial.println("Bonjour local address: http://zkclock.local/");
+      Serial.println("Bonjour secure station: https://zkclock.local/");
     }
     reported = true;
     statusLine = "WIFI CONNECTED";
@@ -826,7 +1098,7 @@ void connectWifiIfNeeded() {
     statusLine = "WIFI DISCONNECTED";
     drawScreen();
   }
-  if ((connected || net.apOn) && !serverStarted) startHttpOnce();
+  if (net.apOn && !serverStarted) startHttpOnce();
 }
 
 } // namespace
@@ -839,7 +1111,12 @@ void setup() {
   stored.load();
   rtcClock.begin();
   screenIdle.begin();
+  sessions.begin();
+  uint8_t nonce[16];esp_fill_random(nonce, sizeof(nonce));
+  static const char chars[]="0123456789abcdef";
+  for(uint8_t i:nonce){csrfToken+=chars[i>>4];csrfToken+=chars[i&15];}
   // No network write to attendance device on startup.
+  initSecureRoutes();
   connectWifiIfNeeded();
   drawScreen();
 }
@@ -855,16 +1132,16 @@ void loop() {
       wakeBlockUntilRelease = true;
       drawScreen();
     }
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
   screenIdle.update();
   if (screenIdle.sleeping()) {
     if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -873,8 +1150,8 @@ void loop() {
   if (wakeBlockUntilRelease) {
     if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
       wakeBlockUntilRelease = false;
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -886,7 +1163,7 @@ void loop() {
       statusLine="WEB EDIT 90s";
       drawScreen();
     }
-    if (serverStarted && WiFi.status()==WL_CONNECTED) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -895,8 +1172,8 @@ void loop() {
   if (comboLatched) {
     if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
       comboLatched=false;
-    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
-      server.handleClient();
+    if (net.apOn && serverStarted) server.handleClient();
+    secureServiceTick();
     delay(15);
     return;
   }
@@ -906,6 +1183,7 @@ void loop() {
       localArm.revoke();
       showSetupQr = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning=false; }
+      if(secureStarted){secureServer.close();secureStarted=false;}
       net.startAP();
       if (net.apOn) {
         // Advertise the same friendly address in setup mode when phone/mDNS
@@ -936,6 +1214,7 @@ void loop() {
       buttonBLatched = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
       net.stopAP();
+      if(serverStarted){server.stop();serverStarted=false;}
       screenMode = ScreenMode::BOOT;
       drawScreen();
     }
@@ -948,6 +1227,7 @@ void loop() {
     if (M5.BtnA.pressedFor(3000) && !buttonALatched) {
       buttonALatched = true;
       WiFi.disconnect(false, false);
+      if(secureStarted){secureServer.close();secureStarted=false;}
       screenMode = ScreenMode::BOOT;
       drawScreen();
     }
@@ -974,7 +1254,7 @@ void loop() {
       longShiftHold = false;
     }
   }
-  if ((WiFi.status() == WL_CONNECTED || net.apOn) && serverStarted)
-    server.handleClient();
+  if(net.apOn && serverStarted) server.handleClient();
+  secureServiceTick();
   delay(15);
 }

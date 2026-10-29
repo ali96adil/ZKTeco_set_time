@@ -5,7 +5,7 @@
 #include <Arduino.h>
 #include <M5StickCPlus.h>
 #include <Preferences.h>
-#include <WebServer.h>
+#include <ESPWebServer.hpp>
 #include "m5_presets.h"
 #include "web_navigation.h"
 #include "zk_wire.h"

@@ -4,6 +4,18 @@
 
 > The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
 
+## M9 — M5 HTTPS and renewable trusted iPhone sessions (draft)
+
+**Branch:** [feature/m9-https-persistent-session](https://github.com/ali96adil/ZKTeco_set_time/tree/feature/m9-https-persistent-session) · [M9 deployment and security guide](docs/M9_HTTPS_SLIDING_SESSIONS.md) · [draft PR #9](https://github.com/ali96adil/ZKTeco_set_time/pull/9).
+
+- M5 independently hosts **`https://zkclock.local/`** in CONNECT mode. Old plain HTTP is restricted to the protected physical SETUP AP.
+- Configure a **fixed username/password once** on `http://192.168.4.1/auth/setup` while the M5 broadcasts its private WPA2 network. iPhone Safari AutoFill is supported. The salted password verifier is saved locally, not to GitHub.
+- Phone session cookie is **Secure, HttpOnly, SameSite=Strict**, lasts **365 days**, and **renews on every authenticated visit**. There is no 90-day hard expiry; users can revoke all browser sessions.
+- Full-datetime presets and M5 RTC can be managed independently from either the iPhone's trusted HTTPS web UI or the M5's physical buttons.
+- **Real terminal writes remain disabled in the default firmware.** The separate write-enabled lab build compiles both physical-B and authenticated HTTPS command paths but is **not flashed automatically**. Qualify on real M5 and terminal before considering production activation.
+- TLS CA/certificate/private key must be **generated on the operator's Mac** with `tools/create_m5_tls.sh`. The private key and generated `include/m5_tls_local.h` are ignored by Git; never commit or share them. iPhone must explicitly trust the resulting local CA.
+- To fit TLS firmware, `huge_app.csv` is used on the original **4 MiB** M5StickC Plus (USB flashing, no OTA slot). Record existing preferences before the first firmware update.
+
 ## M8 — Fast one-page M5 control (working draft)
 
 **New branch:** [feature/m8-fast-home-local-edit](https://github.com/ali96adil/ZKTeco_set_time/tree/feature/m8-fast-home-local-edit) · [operator guide](docs/M8_FAST_UI_LOCAL_EDIT.md) · [PR #8](https://github.com/ali96adil/ZKTeco_set_time/pull/8).

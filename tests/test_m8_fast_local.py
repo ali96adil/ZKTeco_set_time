@@ -42,7 +42,11 @@ class M8Contracts(unittest.TestCase):
     def test_station_cannot_edit_secrets(self):
         self.assertIn('action=="settings"',SRC)
         self.assertIn('action=="presets"',SRC)
-        self.assertNotIn('server.arg("pass")',SRC)
+        # M9 adds credentials on physically selected WPA2 setup AP.
+        # Station editor still cannot accept a station WiFi password.
+        station_api=SRC.split('server.on("/api/m8/save", HTTP_POST')[1].split(
+            'server.on("/api/m8/select", HTTP_POST')[0]
+        self.assertNotIn('server.arg("pass")',station_api)
         self.assertIn("net.currentApName()",SRC)
         self.assertIn('currentApName() const',NET)
         self.assertIn('MDNS.begin("zkclock")',SRC)
