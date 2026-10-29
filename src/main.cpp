@@ -900,6 +900,25 @@ bool copyM9Presets(M5Preset* proposal,uint8_t& length) {
 }
 
 void initSecureRoutes() {
+  // PWA resources must be served over the same authenticated HTTPS origin.
+  secureServer.on("/manifest.webmanifest",HTTP_GET,[](){
+    secureServer.sendHeader("Cache-Control","public, max-age=3600");
+    secureServer.send(200,"application/manifest+json",
+      "{\"name\":\"ZK Clock\",\"short_name\":\"ZK Clock\","
+      "\"start_url\":\"/\",\"scope\":\"/\",\"display\":\"standalone\","
+      "\"theme_color\":\"#0c1725\",\"background_color\":\"#0c1725\","
+      "\"icons\":[{\"src\":\"/icon.svg\",\"sizes\":\"any\","
+      "\"type\":\"image/svg+xml\"}]}");
+  });
+  secureServer.on("/icon.svg",HTTP_GET,[](){
+    secureServer.sendHeader("Cache-Control","public, max-age=3600");
+    secureServer.send(200,"image/svg+xml",
+      "<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'"
+      " viewBox='0 0 180 180'><rect width='180' height='180' rx='32'"
+      " fill='#0c1725'/><circle cx='90' cy='90' r='62' fill='#2376cf'/>"
+      "<path d='M90 48v43h33' stroke='white' stroke-width='11'"
+      " stroke-linecap='round' fill='none'/></svg>");
+  });
   secureServer.on("/login",HTTP_GET,[](){
     secureServer.sendHeader("Cache-Control","no-store");
     secureServer.send_P(200,"text/html; charset=utf-8",M9_LOGIN);
