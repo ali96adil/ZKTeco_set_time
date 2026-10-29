@@ -18,7 +18,7 @@ if [[ -f .secrets/mac.crt ]]; then
     exit 0
   fi
 fi
-if [[ "\${1:-}" != "--rotate" ]]; then
+if [[ "${1:-}" != "--rotate" ]]; then
   echo
   echo "EXISTING certificate does not include the hostname."
   echo "No changes made. To rotate certificates deliberately:"
