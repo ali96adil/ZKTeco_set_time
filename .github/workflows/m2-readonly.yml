@@ -26,6 +26,8 @@ jobs:
           openssl verify -CAfile .secrets/ca.crt .secrets/mac.crt
           openssl x509 -in .secrets/mac.crt -noout -ext subjectAltName
           test ! -e .secrets/ca.key
+      - name: HTTPS authentication and CSRF rejection (local fake server)
+        run: python3 -m unittest discover -s tests -p 'test_gateway_http_security.py' -v
       - name: Offline Mac gateway safety and verification tests
         run: python3 -m unittest discover -s tests -p 'test_gateway_offline.py' -v
       - name: Mac simulator mock and live-readonly integration tests
