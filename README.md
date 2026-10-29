@@ -2,7 +2,7 @@
 
 **M2: EXPERIMENTAL, READ-ONLY + MOBILE DRY-RUN PREVIEW**
 
-> No firmware binary has been built or flashed on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
+> The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
 
 ## Scope and behavior
 
@@ -23,7 +23,7 @@ This is exclusively a clock tool. Attendance logs, fingerprints, employee record
 
 The Mac already proved successful read and set/reconnect verification to ZKTeco iFace 950, firmware **Ver 6.60 May 14 2018**, using \`pyzk==0.9\` and **TCP 4370**. **The ESP32 implementation is still untested on the physical device**.
 
-The M5StickC Plus only uses 2.4 GHz Wi-Fi. It must join a private Wi-Fi LAN which can route to the attendance terminal; the earlier Mac routing result alone does not guarantee access from the M5. Phone must access M5's same reachable private network. **Do not port-forward or expose the HTTP page to public networks.**
+The M5StickC Plus only uses 2.4 GHz Wi-Fi. For an OPEN WLAN with MikroTik Hotspot, Wi-Fi association needs no passphrase, but the Hotspot may separately block routed TCP/4370 or phone-to-M5 HTTP. See [OPEN_WIFI_MIKROTIK.md](docs/OPEN_WIFI_MIKROTIK.md) for read-only checks and authorized IT options. It must join a private Wi-Fi LAN which can route to the attendance terminal; the earlier Mac routing result alone does not guarantee access from the M5. Phone must access M5's same reachable private network. **Do not port-forward or expose the HTTP page to public networks.**
 
 The terminal is set by an unencrypted SDK protocol with communication key 0 on the previously tested Mac link. Protect the network and review the router ACL with IT.
 
@@ -36,7 +36,7 @@ git switch feature/m2-mobile-preview
 
 cp include/config.example.h include/config.h
 nano include/config.h
-# Fill your real 2.4-GHz Wi-Fi SSID and password.
+# Fill your real 2.4-GHz Wi-Fi SSID; for OPEN Wi-Fi keep ZK_WIFI_PASSWORD as an empty string (\"\").
 # Set ZK_DEVICE_IP to 10.1.65.2 if this is still the authorized device address.
 # Save nano: Ctrl+O, Enter, Ctrl+X.
 
@@ -60,7 +60,7 @@ pio run -e m5stickc-plus-readonly -t upload
 pio device monitor -b 115200
 \`\`\`
 
-If you have multiple serial ports, supply the correct one using \`--upload-port\`. The M5 screen will display \`http://<LAN-IP>\` when Wi-Fi connects. Open that address in the phone browser and press **Read Device**. The read-only firmware sends a request only when the button is pressed (no auto-polling).
+If you have multiple serial ports, supply the correct one using \`--upload-port\`. After joining Wi-Fi the serial monitor prints the M5 IP, gateway and STA MAC; the latter is only for authorized network administration. The M5 screen will display \`http://<LAN-IP>\` when Wi-Fi connects. Open that address in the phone browser and press **Read Device**. The read-only firmware sends a request only when the button is pressed (no auto-polling).
 
 Record whether: (a) M5 joins Wi-Fi, (b) device time read returns, (c) the displayed time agrees with the actual ZKTeco screen, and (d) the preview correctly handles earlier and later dates. Do **not** test the live write feature: it is intentionally absent.
 
@@ -71,7 +71,7 @@ The sample config uses a non-routable documentation IP \`192.0.2.10\`. Replace i
 - PlatformIO env: \`m5stickc-plus-readonly\`; \`board = m5stick-c\`; \`M5StickCPlus@0.1.1\`.
 - TCP/4370 SDK allowlist: \`CMD_CONNECT=1000\`, \`CMD_GET_TIME=201\`, \`CMD_EXIT=1001\`.
 - No setting/reset/clear commands in this branch.
-- Exposed local HTTP endpoints: \`GET /\`, \`GET /api/read\`; all other paths return 404.
+- Exposed local HTTP endpoints (GET /api/read rate-limited to one attempt every 8 seconds): \`GET /\`, \`GET /api/read\`; all other paths return 404.
 - Time is a wall-clock value, not Unix UTC. Manual calendar comparisons use a synthetic +03:00 mapping of wall-clock fields; **older historical dates before 2008 are not intended as exact historical UTC instants**, but retain the exact civil time entered.
 - Web UI reads one sample per click, then extrapolates locally and marks it stale after one minute.
 - No clock authority is assumed for the M5 RTC. The phone's own clock can also be wrong.
