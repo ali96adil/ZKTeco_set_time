@@ -15,6 +15,8 @@
 #include "m5_rtc.h"
 #include "screen_idle.h"
 #include "web_navigation.h"
+#include "local_arm.h"
+#include "m8_mobile_ui.h"
 #ifndef ZK_ENABLE_M5_TIME_WRITE
 #define ZK_ENABLE_M5_TIME_WRITE 0
 #endif
@@ -32,6 +34,8 @@ NetworkSetup net;
 M5Presets stored;
 M5Clock rtcClock;
 ScreenIdle screenIdle;
+LocalArm localArm;
+bool comboLatched = false;
 bool wakeBlockUntilRelease = false;
 enum class ScreenMode { BOOT, SETUP, CONNECT };
 ScreenMode screenMode = ScreenMode::BOOT;
@@ -592,6 +596,142 @@ void startHttpOnce() {
   net.attachRoutes(server, screenIdle);
   stored.routes(server, net);
   rtcClock.routes(server, net);
+  // The mobile editor never writes to ZKTeco. Live clock changes remain
+  // physically gated, and disabled in the default firmware.
+  server.on("/api/m8", HTTP_GET, []() {
+    stored.load();
+    zkwire::CivilTime rtc;
+    const bool rtcReady = rtcClock.trustworthy(rtc);
+    String out = "{\"ok\":true,\"ssid\":\"" + zkJsonEscape(net.ssid) +
+      "\",\"zk_ip\":\"" + zkJsonEscape(net.zkIp) +
+      "\",\"ap_name\":\"" + zkJsonEscape(net.savedApName.length() ?
+      net.savedApName : net.apSsid) +
+      "\",\"idle\":" + String(screenIdle.timeout()) +
+      ",\"armed\":" + String(localArm.allowed() ? "true" : "false") +
+      ",\"arm_seconds\":" + String(localArm.seconds()) +
+      ",\"rtc_ready\":" + String(rtcReady ? "true" : "false") +
+      ",\"rtc_time\":\"" + (rtcReady ? zkJsonEscape(M5Clock::asString(rtc)) :
+      String("")) + "\",\"items\":[";
+    for (uint8_t i=0; i<stored.count; ++i) {
+      if (i) out += ",";
+      out += "{\"name\":\"" + zkJsonEscape(stored.items[i].name) +
+        "\",\"datetime\":\"" + zkJsonEscape(stored.items[i].datetime) + "\"}";
+    }
+    out += "]}";
+    server.sendHeader("Cache-Control", "no-store");
+    server.sendHeader("Connection","close");
+    server.send(200, "application/json; charset=utf-8", out);
+  });
+  server.on("/api/m8/save", HTTP_POST, []() {
+    // A physically approved session for nonsecret edits. HTTP over an
+    // untrusted Wi-Fi is not secure: never accept station passwords here.
+    if (!server.hasHeader("X-ZK-Edit") ||
+        server.header("X-ZK-Edit") != "1" ||
+        !(localArm.allowed() || net.setupClient(server))) {
+      server.send(403, "application/json",
+        "{\"ok\":false,\"error\":\"اضغط A وB معاً 2 ثانية على M5 ثم أعد الحفظ\"}");
+      return;
+    }
+    String action=server.arg("action");
+    if (action=="presets") {
+      M5Preset proposed[M5Presets::kMax];
+      uint8_t n=0;
+      bool invalid=false;
+      for (uint8_t i=0; i<M5Presets::kMax; ++i) {
+        String name=server.arg("n"+String(i));
+        String datetime=server.arg("v"+String(i));
+        name.trim(); datetime.trim();
+        if (!name.length() && !datetime.length()) continue;
+        if (datetime.length()==16) datetime += ":00";
+        if (!name.length() || name.length()>24 ||
+            !M5Presets::validDateTime(datetime) || name.indexOf('|')>=0)
+          invalid=true;
+        if (!invalid) proposed[n++]={name,datetime};
+      }
+      if (invalid || !stored.save(proposed,n)) {
+        server.send(400,"application/json",
+          "{\"ok\":false,\"error\":\"تحقق من اسم الأمر والتاريخ والوقت الكامل\"}");
+        return;
+      }
+      if (selectedPreset>stored.count) selectedPreset=stored.count;
+      localArm.revoke();
+      statusLine="PRESETS SAVED";
+      drawScreen();
+      server.send(200,"application/json",
+        "{\"ok\":true,\"message\":\"انحفظت الأوامر على M5\"}");
+    } else if (action=="settings") {
+      String name=server.arg("apname");
+      String idleText=server.arg("idle");
+      bool validName=name.length()>=4 && name.length()<=24;
+      for (unsigned i=0;i<name.length();++i) {
+        char c=name[i];
+        if (!((c>='A'&&c<='Z') || (c>='a'&&c<='z') ||
+              (c>='0'&&c<='9') || c=='-' || c=='_')) validName=false;
+      }
+      uint16_t idle=65535;
+      if (idleText=="0") idle=0;
+      if (idleText=="15") idle=15;
+      if (idleText=="30") idle=30;
+      if (idleText=="60") idle=60;
+      if (idleText=="120") idle=120;
+      if (!validName || !ScreenIdle::valid(idle)) {
+        server.send(400,"application/json",
+          "{\"ok\":false,\"error\":\"اسم الشبكة أو مدة النوم غير صالحة\"}");
+        return;
+      }
+      Preferences p;
+      if (!p.begin("zk-net",false)) {
+        server.send(503,"application/json",
+          "{\"ok\":false,\"error\":\"تعذر فتح إعدادات الجهاز\"}");
+        return;
+      }
+      size_t wrote=p.putString("apname",name);
+      p.end();
+      if (!wrote || !screenIdle.save(idle)) {
+        server.send(503,"application/json",
+          "{\"ok\":false,\"error\":\"لم تكتمل عملية الحفظ\"}");
+        return;
+      }
+      net.savedApName=name;
+      localArm.revoke();
+      server.send(200,"application/json",
+        "{\"ok\":true,\"message\":\"تم حفظ اسم الشبكة ووقت نوم الشاشة\"}");
+    } else {
+      server.send(400,"application/json",
+        "{\"ok\":false,\"error\":\"العملية غير معروفة\"}");
+    }
+  });
+  server.on("/api/m8/select", HTTP_POST, []() {
+    // Choose shortcut only. No remote clock SET_TIME, ever.
+    if (!server.hasHeader("X-ZK-Edit") ||
+        server.header("X-ZK-Edit") != "1" ||
+        !(localArm.allowed() || net.setupClient(server))) {
+      server.send(403,"application/json",
+        "{\"ok\":false,\"error\":\"اضغط A وB معاً ثانيتين لتفعيل التجهيز\"}");
+      return;
+    }
+    String text=server.arg("index");
+    stored.load();
+    if (text.length()<1 || text.length()>2) {
+      server.send(400,"application/json",
+        "{\"ok\":false,\"error\":\"رقم الأمر غير صحيح\"}");return;
+    }
+    for(unsigned i=0;i<text.length();++i) if(text[i]<'0'||text[i]>'9') {
+      server.send(400,"application/json",
+        "{\"ok\":false,\"error\":\"رقم الأمر غير صحيح\"}");return;
+    }
+    int index=text.toInt();
+    if (index>stored.count) {
+      server.send(400,"application/json",
+        "{\"ok\":false,\"error\":\"هذا الأمر غير موجود\"}");return;
+    }
+    selectedPreset=index;
+    statusLine="SELECTED ON M5";
+    localArm.revoke();
+    drawScreen();
+    server.send(200,"application/json",
+      "{\"ok\":true,\"message\":\"انحدد الأمر على M5. الضغط المطول B للتنفيذ عند تأهيله\"}");
+  });
   server.on("/api/presets", HTTP_GET, []() {
     stored.load();
     zkwire::CivilTime checkedRtc;
@@ -625,7 +765,8 @@ void startHttpOnce() {
   });
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
-    server.send_P(200, "text/html; charset=utf-8", PAGE);
+    server.sendHeader("Connection","close");
+    server.send_P(200, "text/html; charset=utf-8", M8_HOME);
   });
   server.on("/api/read", HTTP_GET, []() {
     // An open campus WLAN is not trusted. Bound the rate of device reads
@@ -658,6 +799,8 @@ void startHttpOnce() {
   server.onNotFound([]() {
     server.send(404, "text/plain", "Not found. Read-only endpoints only.");
   });
+  const char* m8Headers[]={"X-ZK-Edit"};
+  server.collectHeaders(m8Headers,1);
   server.begin();
   serverStarted = true;
 }
@@ -737,10 +880,24 @@ void loop() {
     return;
   }
   if (M5.BtnA.isPressed() || M5.BtnB.isPressed()) screenIdle.touch();
+  if (screenMode == ScreenMode::CONNECT && M5.BtnA.isPressed() && M5.BtnB.isPressed()) {
+    if (!comboLatched && M5.BtnA.pressedFor(1600) && M5.BtnB.pressedFor(1600)) {
+      localArm.grant();
+      comboLatched=true;
+      statusLine="WEB EDIT 90s";
+      drawScreen();
+    }
+    if (serverStarted && WiFi.status()==WL_CONNECTED) server.handleClient();
+    delay(15);
+    return;
+  }
+  if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed()) comboLatched=false;
   if (screenMode == ScreenMode::BOOT) {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
+      localArm.revoke();
       showSetupQr = true;
+      if (mdnsRunning) { MDNS.end(); mdnsRunning=false; }
       net.startAP();
       if (net.apOn) {
         // Advertise the same friendly address in setup mode when phone/mDNS
