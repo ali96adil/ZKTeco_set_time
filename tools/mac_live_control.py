@@ -555,7 +555,11 @@ document.getElementById('pair').onclick=async()=>{
             self.reply(200,result)
         except PermissionError:
             self.reply(403,{"ok":False,"error":"Write disabled"})
-        except (ValueError,OverflowError,OSError):
+        except ValueError as exc:
+            message = (str(exc) if path in ("/api/quick", "/api/shortcuts")
+                       else "Invalid or expired request")
+            self.reply(400,{"ok":False,"error":message})
+        except (OverflowError,OSError):
             self.reply(400,{"ok":False,"error":"Invalid or expired request"})
         except Exception as exc:
             self.reply(503,{"ok":False,"error":"Operation not confirmed: "+
