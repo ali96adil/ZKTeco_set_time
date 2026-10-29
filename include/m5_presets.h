@@ -100,10 +100,59 @@ class M5Presets {
           + NetworkSetup::safeHtml(items[i].datetime) + "'></fieldset>";
       }
       page += "<button type='submit'>حفظ الاختصارات على M5</button></form>"
+        "<hr><h3>استيراد الأوامر من الماك</h3>"
+        "<p>في واجهة الماك اضغط نسخ أوامر M5 ثم الصقها هنا."
+        " كل سطر يكون: اسم|YYYY-MM-DDTHH:MM:SS</p>"
+        "<form action='/presets/import' method='post'>"
+        "<textarea name='bulk' rows='9' maxlength='1600' style='width:100%;padding:10px'></textarea>"
+        "<button type='submit'>استيراد وحفظ</button></form>";
         "<p>هذه إعدادات محلية على الجهاز، وليست تشغيل أوامر الساعة من المتصفح."
         " للتنفيذ اختر الاختصار من أزرار M5 بعد الاتصال بالشبكة.</p></body></html>";
       server.sendHeader("Cache-Control", "no-store");
       server.send(200, "text/html; charset=utf-8", page);
+    });
+    server.on("/presets/import", HTTP_POST, [this, &server, &net]() {
+      if (!net.setupClient(server)) {
+        server.send(403, "text/plain", "Connect to physical M5 setup AP");
+        return;
+      }
+      String bulk = server.arg("bulk");
+      if (!bulk.length() || bulk.length() > 1600) {
+        server.send(400, "text/plain", "No shortcuts to import"); return;
+      }
+      M5Preset values[kMax];
+      uint8_t n = 0;
+      int cursor = 0;
+      while (cursor < int(bulk.length())) {
+        int newline = bulk.indexOf('\n', cursor);
+        if (newline == -1) newline = bulk.length();
+        String row = bulk.substring(cursor, newline);
+        row.trim();
+        cursor = newline + 1;
+        if (!row.length()) continue;
+        if (n >= kMax) {
+          server.send(400, "text/plain", "Maximum eight M5 presets"); return;
+        }
+        int sep = row.indexOf('|');
+        if (sep <= 0 || row.lastIndexOf('|') != sep) {
+          server.send(400, "text/plain", "Expected name|full datetime"); return;
+        }
+        String name = row.substring(0, sep);
+        String value = row.substring(sep + 1);
+        name.trim(); value.trim();
+        if (!name.length() || name.length() > 24 || !validDateTime(value)) {
+          server.send(400, "text/plain",
+                      "Preset label 1-24 bytes; valid full date and time required");
+          return;
+        }
+        values[n++] = {name, value};
+      }
+      if (!n || !save(values, n)) {
+        server.send(400, "text/plain", "Could not save imported commands"); return;
+      }
+      server.send(200, "text/html; charset=utf-8",
+        "<meta charset='utf-8'><h3>تم استيراد الاختصارات</h3>"
+        "<p>اختار وضع الاتصال على شاشة M5 حتى تتصفحها.</p>");
     });
     server.on("/presets", HTTP_POST, [this, &server, &net]() {
       if (!net.setupClient(server)) {
