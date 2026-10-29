@@ -51,11 +51,14 @@ public:
     return "ZK-Setup-" + suffix.substring(suffix.length()>6 ? suffix.length()-6 : 0);
   }
 
+  // SETUP is physically selected, AP-only WPA2, served by the SAME
+  // HTTPS listener/certificate/hostname as CONNECT. No HTTP credential path.
   bool setupClient(WebServer& server) const {
-    // Port 80 is started only while physically selected SETUP AP is active.
-    // HTTPS station is a separate TLS-only listener on port 443.
-    (void)server;
-    return apOn;
+    if (!apOn) return false;
+    if (server.method() != HTTP_POST) return true;
+    const String origin=server.header("Origin");
+    return origin=="https://zkclock.local" ||
+           origin=="https://192.168.4.1";
   }
 
   static String safeHtml(String str) {
@@ -69,8 +72,15 @@ public:
 
   void attachRoutes(WebServer& server, ScreenIdle& idle) {
     server.on("/setup", HTTP_GET, [this, &server, &idle]() {
-      const bool editable = setupClient(server);
+      if (!setupClient(server)) {
+        server.send(403,"text/plain","SETUP AP only");return;
+      }
+      const bool editable = true;
       String page = zkPageBegin("إعدادات M5");
+      page += "<p><b>https://zkclock.local</b> — نفس الرابط بالوضعين.</p>"
+        "<p>إذا Bonjour ما اشتغل، افتح https://192.168.4.1/setup (شهادة TLS تشمل عنوان الـAP).</p>"
+        "<p><a href='/auth/setup'>إدارة حساب الدخول</a> | <a href='/presets'>الاختصارات</a> | "
+        "<a href='/rtc'>RTC</a></p>";
       page += "<p>الحالة: <b>" + String(editable ? "شبكة الإعداد الآمنة" : "الاتصال بالشبكة") + "</b></p>";
       page += "<p>الشبكة الحالية: <b>" + safeHtml(ssid) + "</b></p>";
       page += "<p>عنوان البصمة: <b dir='ltr'>" + safeHtml(zkIp) + "</b></p>";
@@ -104,7 +114,7 @@ public:
       } else {
         page += "<p style='background:#393023;padding:12px'>للتعديل: اضغط A مطولاً "
           "على M5 للعودة لقائمة البداية، ثم A لاختيار SETUP، واتصل بشبكته "
-          "الآمنة وافتح <b>192.168.4.1/setup</b>. لا يمكن تعديل "
+          "الآمنة وافتح <b>https://zkclock.local/setup</b>. لا يمكن تعديل "
           "بيانات Wi-Fi عبر شبكة الجامعة المفتوحة.</p>";
       }
       page += zkPageEnd();
