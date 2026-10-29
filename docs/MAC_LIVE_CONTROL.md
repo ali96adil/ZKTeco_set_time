@@ -33,19 +33,22 @@ git fetch origin
 git switch feature/mac-live-control
 git pull --ff-only origin feature/mac-live-control
 
-mkdir -p .secrets
 MAC_IP=$(ipconfig getifaddr en0)
 echo "Mac IP: $MAC_IP"
-
-openssl req -x509 -newkey rsa:3072 -sha256 -nodes \
-  -keyout .secrets/mac.key -out .secrets/mac.crt -days 7 \
-  -subj "/CN=$MAC_IP" \
-  -addext "subjectAltName=IP:$MAC_IP,IP:127.0.0.1,DNS:localhost"
-
-chmod 600 .secrets/mac.key
+bash tools/create_local_tls.sh "$MAC_IP"
 ```
 
-**Important:** This creates a self-signed lab certificate, which iOS will NOT trust automatically. For real mobile use on an open Wi-Fi network, arrange **proper certificate trust and validation** with IT first. Never copy private keys to the phone. The certificate/key stay local and are excluded from Git.
+**Important:** This creates a separate 7-day private CA and a server certificate whose IP matches the Mac. The script deletes the CA signing private key once the server certificate is issued, but the server key remains sensitive. iOS will **not** trust this CA until you explicitly install and trust it.
+
+To use Safari on the iPhone **safely** on an open Wi-Fi network:
+
+1. AirDrop **only** `.secrets/ZKTeco_Local_CA.cer` to the iPhone. Never AirDrop `.key` files. Do not distribute the CA over the open Hotspot using ordinary HTTP.
+2. On the iPhone, open **Settings → General → VPN & Device Management** and install the downloaded certificate profile if prompted. Then open **Settings → General → About → Certificate Trust Settings** and enable full trust **only for the named temporary ZKTeco Local Admin CA**.
+3. Before trusting, verify the CA SHA-256 fingerprint printed on the Mac with the certificate details on the phone when available, or confirm transfer provenance directly using AirDrop. Do **not** trust any unsolicited similarly named certificate.
+4. Visit `https://<MAC_IP>:8766/`. Safari must show an ordinary **trusted** HTTPS connection with no certificate warning. **Do not bypass a certificate warning to enter the temporary password.** If a warning persists, stop and check the IP / certificate / profile.
+5. After the approved maintenance session, stop the server and **remove the temporary CA profile / trust** from the iPhone. The private key `.secrets/mac.key` and certificates remain in the ignored local folder until you intentionally delete them.
+
+Installing a root certificate grants broad trust for certificates issued by that root, so use this only for the short approved session. Prefer an organization-managed certificate on a trusted isolated management Wi-Fi when available. The LAN must allow phone → Mac HTTPS and Mac → ZKTeco TCP/4370 separately.
 
 Test the gateway read-only *on the Mac* (it still needs a valid/trusted HTTPS cert for the browser):
 
@@ -92,7 +95,8 @@ A backwards correction may create overlapping timestamps for **new** attendance 
 ## Validation
 
 - [x] Independent earlier Mac `pyzk` read/set/reconnect experiment confirmed clock adjustment.
-- [ ] Syntax, isolated gateway tests and GitHub Actions for this new gateway confirmed.
+- [x] Python syntax, mocked one-shot verification and read-only guard tested in GitHub Actions; see linked workflow run in pull request.
+- [ ] Browser authentication, CSRF and trusted HTTPS fully qualified on the operator's Mac + iPhone.
 - [ ] Trusted mobile HTTPS certificate and authorization reviewed.
 - [ ] Controlled live write via this new gateway confirmed by an operator during an approved maintenance window.
 
