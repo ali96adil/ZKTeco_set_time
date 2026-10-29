@@ -8,6 +8,7 @@
 #include <M5StickCPlus.h>
 #include "config.h"
 #include "zk_wire.h"
+#include "network_setup.h"
 
 namespace {
 constexpr uint16_t CMD_CONNECT = zkwire::kConnect;
@@ -18,6 +19,8 @@ constexpr uint16_t CMD_ACK_UNAUTH = zkwire::kAckUnauth;
 constexpr size_t MAX_PACKET_BODY = zkwire::kMaxBody;
 constexpr uint32_t TIMEOUT_MS = 5000;
 WebServer server(80);
+NetworkSetup net;
+bool buttonBLatched = false;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
 String statusLine = "BOOT";
@@ -92,7 +95,7 @@ bool readDeviceClock(String &clock, String &error, uint32_t &durationMs) {
     return false;
   }
   IPAddress ip;
-  if (!ip.fromString(ZK_DEVICE_IP)) {
+  if (!ip.fromString(net.zkIp)) {
     error = "Invalid target IP in config.h";
     return false;
   }
@@ -314,23 +317,32 @@ render();
 
 void drawScreen() {
   M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(5, 5);
-  M5.Lcd.setTextSize(2);
+  M5.Lcd.setCursor(5, 4);
   M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setTextSize(2);
   M5.Lcd.println("ZKTeco clock");
   M5.Lcd.setTextSize(1);
-  M5.Lcd.println("M2 - READ ONLY");
-  M5.Lcd.println(statusLine);
-  if (WiFi.status() == WL_CONNECTED) {
-    M5.Lcd.print("URL: http://");
-    M5.Lcd.println(WiFi.localIP().toString());
+  if (net.apOn) {
+    M5.Lcd.println("WPA2 SETUP AP");
+    M5.Lcd.println(net.apSsid);
+    M5.Lcd.println("Password: " + net.apPassword);
+    M5.Lcd.println("http://192.168.4.1/setup");
+    M5.Lcd.println("Hold B to close AP");
+    if (WiFi.status() == WL_CONNECTED)
+      M5.Lcd.println("STA " + WiFi.localIP().toString());
+  } else {
+    M5.Lcd.println("M3 READ ONLY");
+    M5.Lcd.println(statusLine);
+    if (WiFi.status() == WL_CONNECTED)
+      M5.Lcd.println("http://" + WiFi.localIP().toString());
+    M5.Lcd.println(lastClock);
+    M5.Lcd.println("A: read / B hold: setup");
   }
-  M5.Lcd.println(lastClock);
-  M5.Lcd.println("A: Read  B: no-op");
 }
 
 void startHttpOnce() {
   if (serverStarted) return;
+  net.attachRoutes(server);
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html; charset=utf-8", PAGE);
@@ -371,53 +383,32 @@ void startHttpOnce() {
 }
 
 void connectWifiIfNeeded() {
-  static bool reportedConnected = false;
-  if (WiFi.status() == WL_CONNECTED) {
+  static bool reported = false;
+  net.tick();
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  if (connected && !reported) {
+    reported = true;
     statusLine = "WIFI CONNECTED";
-    if (!reportedConnected) {
-      reportedConnected = true;
-      Serial.println("=== WIFI CONNECTED ===");
-      Serial.println("SSID: " + WiFi.SSID());
-      Serial.println("M5 IP: " + WiFi.localIP().toString());
-      Serial.println("Gateway: " + WiFi.gatewayIP().toString());
-      Serial.println("M5 STA MAC: " + WiFi.macAddress());
-      Serial.println("NOTE: Wi-Fi connected does NOT prove MikroTik Hotspot access.");
-      drawScreen();
-    }
-    startHttpOnce();
-    return;
-  }
-  if (reportedConnected) {
-    reportedConnected = false;
+    Serial.println("M5 IP: " + WiFi.localIP().toString());
+    Serial.println("Gateway: " + WiFi.gatewayIP().toString());
+    Serial.println("STA MAC: " + WiFi.macAddress());
+    drawScreen();
+  } else if (!connected && reported) {
+    reported = false;
     statusLine = "WIFI DISCONNECTED";
-    Serial.println("WIFI DISCONNECTED");
     drawScreen();
   }
-  if (millis() - lastWifiAttempt < 15000) return;
-  lastWifiAttempt = millis();
-  statusLine = "CONNECTING WIFI";
-  WiFi.mode(WIFI_STA);
-  // ESP32 WiFi.begin accepts nullptr for genuinely open Wi-Fi networks.
-  // Captive-portal / MikroTik Hotspot login, if any, is a separate layer.
-  if (strlen(ZK_WIFI_PASSWORD) == 0) {
-    WiFi.setMinSecurity(WIFI_AUTH_OPEN);
-    WiFi.begin(ZK_WIFI_SSID);
-    Serial.println("Joining OPEN Wi-Fi (no passphrase)");
-  } else {
-    WiFi.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD);
-    Serial.println("Joining protected Wi-Fi");
-  }
-  drawScreen();
+  if ((connected || net.apOn) && !serverStarted) startHttpOnce();
 }
+
 } // namespace
 
 void setup() {
   M5.begin();
   Serial.begin(115200);
   M5.Lcd.setRotation(1);
-  WiFi.setAutoReconnect(true);
+  net.begin(ZK_WIFI_SSID, ZK_WIFI_PASSWORD, ZK_DEVICE_IP);
   // No network write to attendance device on startup.
-  lastWifiAttempt = millis() - 15000;
   connectWifiIfNeeded();
   drawScreen();
 }
@@ -425,7 +416,15 @@ void setup() {
 void loop() {
   M5.update();
   connectWifiIfNeeded();
-  if (WiFi.status() == WL_CONNECTED && serverStarted) server.handleClient();
+  if (!M5.BtnB.isPressed()) buttonBLatched = false;
+  if (!buttonBLatched && M5.BtnB.pressedFor(1800)) {
+    buttonBLatched = true;
+    if (net.apOn) net.stopAP(); else net.startAP();
+    drawScreen();
+  }
+  if (net.apOn && !serverStarted) startHttpOnce();
+  if ((WiFi.status() == WL_CONNECTED || net.apOn) && serverStarted)
+    server.handleClient();
   if (M5.BtnA.wasPressed()) {
     String clock, error;
     uint32_t ms = 0;
