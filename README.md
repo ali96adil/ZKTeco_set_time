@@ -4,6 +4,15 @@
 
 > The read-only firmware compiled successfully on GitHub Actions, but has not been flashed or tested on the owner's physical M5StickC Plus yet. The existing ZKTeco terminal must not be changed by this branch.
 
+## M5 — Stable iPhone Home Screen and calibrated M5 RTC
+
+**In draft branch `feature/m5-home-rtc`**. Full guide: [Home Screen, trusted Bonjour URL and RTC clock](docs/M5_HOME_RTC_ZK_CAPABILITIES.md).
+
+- Mac HTTPS gateway exposes `/manifest.webmanifest`, Apple Home Screen icon and standalone metadata. Bonjour hostname **`<Mac LocalHostName>.local`** gives a stable name across DHCP changes on Wi-Fi networks where mDNS is allowed. The HTTPS certificate MUST cover that hostname: inspect with `bash tools/prepare_home_domain.sh`, then intentionally rotate it with `--rotate` if needed and re-trust the new temporary CA on the phone.
+- M5 uses `zkclock.local` in normal Wi-Fi mode when mDNS is permitted; its protected setup AP retains the known fallback `192.168.4.1`. This does **not** share a hostname or web server with the Mac.
+- M5 BM8563 RTC can be calibrated from the phone via the protected AP route `/rtc`, and a calibrated RTC appears as a selectable *physical* M5 shortcut. Seven-day calibration window, no automatic clock writes; M5 production firmware still read-only until hardware verification.
+- iFace950 expanded SDK capabilities are documented as **proposals only**. No user, attendance or biometric records were fetched.
+
 ## M4 — Full clock commands and manual startup selection
 
 **Current working draft:** [feature/m4-boot-ui-presets](https://github.com/ali96adil/ZKTeco_set_time/tree/feature/m4-boot-ui-presets) · [M4 guide](docs/M4_BOOT_AND_FULL_DATETIME.md).
