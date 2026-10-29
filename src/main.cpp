@@ -32,6 +32,7 @@ NetworkSetup net;
 M5Presets stored;
 M5Clock rtcClock;
 ScreenIdle screenIdle;
+bool wakeBlockUntilRelease = false;
 enum class ScreenMode { BOOT, SETUP, CONNECT };
 ScreenMode screenMode = ScreenMode::BOOT;
 uint8_t selectedPreset = 0;
@@ -709,6 +710,7 @@ void loop() {
     if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
       screenIdle.touch();
+      wakeBlockUntilRelease = true;
       drawScreen();
     }
     if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
@@ -719,6 +721,16 @@ void loop() {
   screenIdle.update();
   if (screenIdle.sleeping()) {
     if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
+    if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
+      server.handleClient();
+    delay(15);
+    return;
+  }
+  // A wake-up hold is consumed until release, preventing accidental 2s
+  // B-held clock execution when the operator only meant to light the LCD.
+  if (wakeBlockUntilRelease) {
+    if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
+      wakeBlockUntilRelease = false;
     if (serverStarted && (WiFi.status()==WL_CONNECTED || net.apOn))
       server.handleClient();
     delay(15);
