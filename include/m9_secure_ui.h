@@ -2,7 +2,7 @@
 // Single-page mobile interface: instant tabs (no page-to-page network round trips).
 // Does not expose any HTTP terminal clock write or staff record operation.
 #include <Arduino.h>
-static const char M9_HOME[] PROGMEM = R"M8HTML(<!doctype html>
+static const char M9_HOME[] PROGMEM = R"M9HTML(<!doctype html>
 <html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0c1725">
@@ -63,7 +63,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <p class="note">الزر ينفذ من الآيفون مباشرة بعد الدخول الموثوق. نسخة READ ONLY تبقى للفحص.</p>
 </div>
 <div class="card">
-<div class="row"><div><h2>صلاحية التعديل</h2><p class="note">الدخول محفوظ على الآيفون ويتجدد تلقائياً</p></div>
+<div class="row"><div><h2>تسجيل الدخول</h2><p class="note">الدخول محفوظ على الآيفون ويتجدد تلقائياً</p></div>
 <span class="status" id="armedHome">مقفول</span></div>
 <button class="alt action" id="refreshHome">تحديث الحالة</button>
 <button class="alt action" id="revokeAll">خروج من كل الأجهزة</button>
@@ -93,7 +93,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 </select>
 <button class="action" id="saveSettings">حفظ الاسم والنوم</button>
 <p class="note">الاسم الجديد يشتغل عند دخول وضع SETUP مرة ثانية. إعداد اتصال Wi-Fi الأولي من شبكة SETUP؛ بيانات الحساب والجلسة عبر HTTPS.</p>
-<a href="/setup" style="color:#b2dbff">إعدادات الاتصال التفصيلية</a>
+<p class="note">تغيير شبكة اتصال M5 نفسها يتم بوضع SETUP على الجهاز: 192.168.4.1/setup</p>
 </div>
 </section>
 <section id="rtc" hidden>
@@ -102,11 +102,11 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <p id="rtcState" class="note">—</p>
 <button class="action" id="syncRtc">مزامنة ساعة M5 من الآيفون</button>
 <p class="note">مزامنة ساعة M5 فقط، وليس ساعة البصمة.</p>
-<a href="/rtc" style="color:#b2dbff">تفاصيل ومعايرة RTC</a>
+<p class="note">عمر المعايرة المقبول 7 أيام. المزامنة من الزر أعلاه.</p>
 </div>
 </section>
 <p id="message" aria-live="polite" class="note"></p>
-<footer>واجهة محلية • لا تنفذ أوامر ساعة البصمة من HTTP العام</footer>
+<footer>HTTPS على M5 • التنفيذ الحقيقي محصور بإصدار الكتابة المؤهل</footer>
 </div>
 <script>
 'use strict';
@@ -233,10 +233,10 @@ el('saveSettings').onclick=async()=>{
 el('clockRead').onclick=async()=>{
  el('clockStatus').textContent='جاري الاتصال بالبصمة…';
  try{
-   const r=await api('/api/read');
+   const r=await api('/api/m9/read');
    el('deviceClock').textContent=r.device_time.replace('T',' ');
    el('clockStatus').textContent='تمت القراءة';
  }catch(err){el('clockStatus').textContent='تعذرت القراءة: '+err.message;}
 };
 refresh();
-</script></body></html>)M8HTML";
+</script></body></html>)M9HTML";
