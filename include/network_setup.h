@@ -42,6 +42,14 @@ public:
     ready = true;
   }
 
+  String currentApName() const {
+    if (savedApName.length()) return savedApName;
+    if (apSsid.length()) return apSsid;
+    String suffix=WiFi.macAddress();
+    suffix.replace(":","");
+    return "ZK-Setup-" + suffix.substring(suffix.length()>6 ? suffix.length()-6 : 0);
+  }
+
   bool setupClient(WebServer& server) const {
     return apOn && server.client().localIP() == WiFi.softAPIP();
   }
@@ -63,7 +71,7 @@ public:
       page += "<p>الشبكة الحالية: <b>" + safeHtml(ssid) + "</b></p>";
       page += "<p>عنوان البصمة: <b dir='ltr'>" + safeHtml(zkIp) + "</b></p>";
       page += "<p>اسم شبكة إعداد M5: <b dir='ltr'>" + safeHtml(
-        savedApName.length() ? savedApName : apSsid) + "</b></p>";
+        currentApName()) + "</b></p>";
       page += "<p>إطفاء الشاشة بعد: <b>" + String(idle.timeout()) +
         " ثانية (0 = دائماً مضاءة)</b></p>";
       if (editable) {
@@ -79,7 +87,7 @@ public:
           + safeHtml(zkIp) + "' required>"
           "<label>اسم شبكة إعداد M5 (حروف إنكليزية أو أرقام أو - أو _)</label>"
           "<input name='apname' maxlength='24' value='" +
-          safeHtml(savedApName.length() ? savedApName : apSsid) +
+          safeHtml(currentApName()) +
           "' required>"
           "<label>نوم الشاشة بعد فترة عدم استخدام</label>"
           "<select id='idle' name='idle' style='display:block;width:100%;padding:12px'>"
