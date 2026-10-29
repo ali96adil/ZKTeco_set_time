@@ -49,7 +49,7 @@ class SecureM9Tests(unittest.TestCase):
         self.assertIn("#if ZK_ENABLE_M5_TIME_WRITE", MAIN)
         self.assertIn("#define ZK_ENABLE_M5_TIME_WRITE 0",MAIN)
         self.assertIn("requires_large_confirmation",MAIN)
-        self.assertIn('"/api/m9/run"',UI)
+        self.assertIn("'/api/m9/run'",UI)
         self.assertIn("SameSite=Strict",SESS)
         self.assertIn('autocomplete="current-password"',LOGIN)
         self.assertIn('autocomplete="username"',LOGIN)
