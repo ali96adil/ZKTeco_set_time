@@ -16,7 +16,6 @@
 #include "m5_rtc.h"
 #include "screen_idle.h"
 #include "web_navigation.h"
-#include "local_arm.h"
 #include "m9_secure_ui.h"
 #include "m9_login_ui.h"
 #include "m5_tls_local.h"
@@ -41,7 +40,6 @@ NetworkSetup net;
 M5Presets stored;
 M5Clock rtcClock;
 ScreenIdle screenIdle;
-LocalArm localArm;
 bool comboLatched = false;
 bool wakeBlockUntilRelease = false;
 enum class ScreenMode { BOOT, SETUP, CONNECT };
@@ -962,7 +960,6 @@ void loop() {
   screenIdle.update();
   if (screenIdle.sleeping()) {
     if (screenMode == ScreenMode::CONNECT) connectWifiIfNeeded();
-    if (net.apOn && serverStarted) server.handleClient();
     secureServiceTick();
     delay(15);
     return;
@@ -972,29 +969,23 @@ void loop() {
   if (wakeBlockUntilRelease) {
     if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
       wakeBlockUntilRelease = false;
-    if (net.apOn && serverStarted) server.handleClient();
     secureServiceTick();
     delay(15);
     return;
   }
   if (M5.BtnA.isPressed() || M5.BtnB.isPressed()) screenIdle.touch();
-  if (screenMode == ScreenMode::CONNECT && M5.BtnA.isPressed() && M5.BtnB.isPressed()) {
-    if (!comboLatched && M5.BtnA.pressedFor(1600) && M5.BtnB.pressedFor(1600)) {
-      localArm.grant();
-      comboLatched=true;
-      statusLine="WEB EDIT 90s";
-      drawScreen();
-    }
+  // Simultaneous A+B is never an arm or execution shortcut.
+  // Consume both presses and their release to prevent accidental writes.
+  if (screenMode == ScreenMode::CONNECT &&
+      M5.BtnA.isPressed() && M5.BtnB.isPressed()) {
+    comboLatched=true;
     secureServiceTick();
     delay(15);
     return;
   }
-  // After combined A+B authorization, consume BOTH button releases.
-  // Releasing just A while still holding B must never trigger a clock write.
-  if (comboLatched) {
-    if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
+  if(comboLatched){
+    if(!M5.BtnA.isPressed() && !M5.BtnB.isPressed())
       comboLatched=false;
-    if (net.apOn && serverStarted) server.handleClient();
     secureServiceTick();
     delay(15);
     return;
@@ -1002,7 +993,6 @@ void loop() {
   if (screenMode == ScreenMode::BOOT) {
     if (M5.BtnA.wasPressed()) {
       screenMode = ScreenMode::SETUP;
-      localArm.revoke();
       showSetupQr = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning=false; }
       if(secureStarted){secureServer.close();secureStarted=false;}
@@ -1035,6 +1025,7 @@ void loop() {
     if (M5.BtnB.pressedFor(2000) && !buttonBLatched) {
       buttonBLatched = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
+      if(secureStarted){secureServer.close();secureStarted=false;}
       net.stopAP();
       screenMode = ScreenMode::BOOT;
       drawScreen();
