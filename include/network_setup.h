@@ -77,10 +77,19 @@ public:
       }
       const bool editable = true;
       String page = zkPageBegin("إعدادات M5");
-      page += "<p><b>https://zkclock.local</b> — نفس الرابط بالوضعين.</p>"
-        "<p>إذا Bonjour ما اشتغل، افتح https://192.168.4.1/setup (شهادة TLS تشمل عنوان الـAP).</p>"
+      page += "<p><b>https://192.168.4.1</b> — الرابط الثابت بوضع SETUP على شبكة الـM5.</p>"
+        "<p>رابط https://zkclock.local/setup يعتمد على Bonjour؛ إذا ما يفتح استعمل عنوان الـIP أعلاه.</p>"
         "<p><a href='/auth/setup'>إدارة حساب الدخول</a> | <a href='/presets'>الاختصارات</a> | "
         "<a href='/rtc'>RTC</a></p>";
+      page += R"BATT(<p id="batteryStatus">بطارية M5: جاري القراءة…</p>
+<script>
+fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
+ const element=document.getElementById('batteryStatus');
+ element.textContent=b.percent_approx>=0
+  ? 'بطارية M5: حوالي '+b.percent_approx+'% ('+(b.voltage_mv/1000).toFixed(2)+'V)'+(b.usb_power?' • USB متصل':'')
+  : 'بطارية M5: القراءة غير متاحة';
+}).catch(()=>{document.getElementById('batteryStatus').textContent='تعذرت قراءة البطارية';});
+</script>)BATT";
       page += "<p>الحالة: <b>" + String(editable ? "شبكة الإعداد الآمنة" : "الاتصال بالشبكة") + "</b></p>";
       page += "<p>الشبكة الحالية: <b>" + safeHtml(ssid) + "</b></p>";
       page += "<p>عنوان البصمة: <b dir='ltr'>" + safeHtml(zkIp) + "</b></p>";
