@@ -602,7 +602,7 @@ void drawSetupQr() {
   M5.Lcd.drawString(batteryLabel(),133,91,1);
   M5.Lcd.drawString("SCAN QR",133,32,2);
   M5.Lcd.drawString("HTTPS",133,58,2);
-  M5.Lcd.drawString("zkclock.local",133,76,1);
+  M5.Lcd.drawString("192.168.4.1",133,76,1);
   M5.Lcd.drawString("A: PASS",133,101,2);
   M5.Lcd.drawString("B hold: exit",133,121,1);
 }
@@ -629,7 +629,7 @@ void drawSetupPassword() {
   M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(0xBDF7,BLACK);
   M5.Lcd.drawString("type both parts without space",8,109,1);
-  M5.Lcd.drawString("https://zkclock.local",8,121,1);
+  M5.Lcd.drawString("https://192.168.4.1",8,121,1);
 }
 
 void drawScreen() {
@@ -1063,6 +1063,10 @@ void loop() {
       if(secureStarted){secureServer.close();secureStarted=false;}
       net.startAP();
       if (net.apOn) {
+        // Try to improve SoftAP Bonjour multicast reception on iOS.
+        // This is only a best-effort AP tweak; .local is not guaranteed.
+        // The AXP192 voltage estimator still reports actual battery voltage.
+        WiFi.setSleep(false);
         // In AP mode answer both Bonjour multicast and ordinary DNS.
         // Never redirect or downgrade HTTPS: same trusted cert, same port 443.
         stopSetupDns();
@@ -1101,6 +1105,7 @@ void loop() {
       stopSetupDns();
       if(secureStarted){secureServer.close();secureStarted=false;}
       net.stopAP();
+      WiFi.setSleep(true); // restore default power savings after SETUP
       screenMode = ScreenMode::BOOT;
       drawScreen();
     }
