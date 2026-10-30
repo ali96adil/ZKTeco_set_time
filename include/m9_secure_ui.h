@@ -44,7 +44,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 [hidden]{display:none!important}
 </style></head><body>
 <div class="wrap">
-<header class="top"><div><small>ZKTeco / M5StickC Plus</small><h1>التحكم بالساعة</h1></div><span class="status"><span id="modeState">ZK CLOCK</span></span></header>
+<header class="top"><div><small>ZKTeco / M5StickC Plus</small><h1>التحكم بالساعة</h1></div><div><span class="status" id="batteryTop">بطارية —</span><br><small id="modeState">ZK CLOCK</small></div></header>
 <nav class="tabbar" aria-label="الصفحات">
 <button data-tab="home" class="active">الرئيسية</button>
 <button data-tab="presets">الأوامر</button>
@@ -83,6 +83,8 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <div class="row"><span class="muted">شبكة الاتصال</span><b id="sta">—</b></div>
 <div class="row"><span class="muted">عنوان البصمة</span><b id="zkip" dir="ltr">—</b></div>
 <div class="row"><span class="muted">الجلسة</span><b id="armedSettings">مقفول</b></div>
+<div class="row"><span class="muted">بطارية M5 (تقريبية)</span><b id="batteryDetail">—</b></div>
+<p class="note">النسبة تقدير من فولتية AXP192؛ الفولتية أدق. ظهور USB يعني الكهرباء متصلة وليس بالضرورة البطارية تشحن.</p>
 <label for="apName">اسم شبكة إعداد M5</label>
 <input id="apName" maxlength="24" autocomplete="off" placeholder="ZK-Setup">
 <label for="idle">إطفاء إضاءة الشاشة بعد</label>
@@ -178,6 +180,17 @@ function drawEditor(){
    field.append(n,inp,d,when);host.append(field);
  });
 }
+async function refreshBattery(){
+ try{
+   const b=await api('/api/battery');
+   const suffix=b.usb_power?' · USB':'';
+   el('batteryTop').textContent=b.valid?'بطارية ~'+b.percent_estimate+'%'+suffix:'بطارية —';
+   el('batteryDetail').textContent=b.valid?'~'+b.percent_estimate+'% · '+Number(b.voltage_v).toFixed(2)+'V'+suffix:'قراءة غير متاحة';
+ }catch(e){
+   el('batteryTop').textContent='بطارية —';
+   el('batteryDetail').textContent='قراءة غير متاحة';
+ }
+}
 async function refresh(){
  try{
    state=await api('/api/m9');
@@ -190,6 +203,7 @@ async function refresh(){
    el('rtcClock').textContent=state.rtc_time||'—';
    el('rtcState').textContent=state.rtc_ready?'معايرة صالحة':'تحتاج معايرة';
    drawHome();drawEditor();
+   await refreshBattery();
  }catch(err){message('تعذر تحميل البيانات: '+err.message);}
 }
 el('refreshHome').onclick=refresh;
@@ -240,4 +254,5 @@ el('clockRead').onclick=async()=>{
  }catch(err){el('clockStatus').textContent='تعذرت القراءة: '+err.message;}
 };
 refresh();
+setInterval(refreshBattery,30000);
 </script></body></html>)M9HTML";
