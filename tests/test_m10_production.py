@@ -17,13 +17,13 @@ class ProductionContracts(unittest.TestCase):
         self.assertIn("[env:m5stickc-plus-production]",PIO)
         self.assertIn("build_flags = -DZK_ENABLE_M5_TIME_WRITE=1",PIO)
         self.assertIn('secureServer.on("/api/m9/run",HTTP_POST',SRC)
-        self.assertIn('executeSelected(large)',SRC)
+        self.assertIn('executeSelected()',SRC)
         self.assertIn('M5.BtnB.pressedFor(2200)',SRC)
         self.assertIn('makeSetTimeFrame(session, reply.replyId, encoded, frame)',SRC)
         self.assertIn("verified = acknowledged && valid",SRC)
         self.assertIn("if (selectedPreset == stored.count && !rtcClock.trustworthy(target))",SRC)
         self.assertNotIn("setInterval(()=>",UI)
-        self.assertIn("confirm('تأكيد تعديل ساعة البصمة",UI)
+        self.assertNotIn('confirm(',UI)
 
     def test_cooldown_two_seconds_after_attempt_completion(self):
         self.assertIn("kClockWriteCooldownMs = 2000",SRC)
