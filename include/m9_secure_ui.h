@@ -60,7 +60,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <div class="card">
 <div class="row"><h2>الأوامر السريعة</h2><small id="count">—</small></div>
 <div id="homePresets"><p class="note">جاري تحميل الأوامر…</p></div>
-<p class="note">التنفيذ المباشر عبر HTTPS مع تأكيد قبل تغيير الوقت وقراءة تحقق مستقلة بعد التنفيذ.</p>
+<p class="note">لمسة واحدة تنفّذ الأمر مباشرة، بما فيه فرق أكبر من 24 ساعة. بعدها النظام يتحقق من ساعة البصمة تلقائياً، بدون إعادة إرسال الأمر.</p>
 </div>
 <div class="card">
 <div class="row"><div><h2>تسجيل الدخول</h2><p class="note">الدخول محفوظ على الآيفون ويتجدد تلقائياً</p></div>
@@ -144,18 +144,17 @@ function drawHome(){
    info.append(title,make('div','when',(p.datetime||'').replace('T',' ')));
    const btn=make('button','alt','تنفيذ');
    btn.onclick=async()=>{
-     if(busy)return;busy=true;btn.disabled=true;
+     if(busy)return;
+     if(!state.write_enabled)return message('التنفيذ مو متاح بهالنسخة');
+     busy=true;btn.disabled=true;btn.textContent='جاري التنفيذ…';
+     message('جاري إرسال '+p.name+' والتحقق من ساعة البصمة…');
      try{
-       if(!state.write_enabled)return message('التنفيذ مو متاح بهالنسخة');
-       if(!confirm('تأكيد تعديل ساعة البصمة حسب الأمر: '+p.name+'؟'))return;
-       let r=await api('/api/m9/run','POST',{index:String(i)});
-       if(r.requires_large_confirmation){
-         if(!confirm('الفرق أكبر من 24 ساعة. متأكد تريد تطبيق التاريخ والوقت؟'))return;
-         r=await api('/api/m9/run','POST',{index:String(i),confirm:'large'});
-       }
+       // One tap = one authenticated POST = one clock SET_TIME attempt.
+       // No browser confirm, no greater-than-24h server confirmation.
+       const r=await api('/api/m9/run','POST',{index:String(i)});
        message(r.message||'تم إرسال الأمر وفحص ساعة البصمة',r.verified===true);
      }catch(err){message(err.message);}
-     finally{busy=false;btn.disabled=false;}
+     finally{busy=false;btn.disabled=false;btn.textContent='تنفيذ';}
    };
    row.append(info,btn);wrap.append(row);host.append(wrap);
  }
