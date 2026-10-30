@@ -87,44 +87,58 @@ class M5Presets {
         server.send(403,"text/plain","SETUP AP only");return;
       }
       load();
-      const bool editable = net.setupClient(server);
-      String page = zkPageBegin("الأوامر المحفوظة");
-      page += "<p>عدد الاختصارات: <b>" + String(count) +
-        "</b> من 8. الأوامر تحتوي التاريخ والساعة معاً.</p>";
-      if (count == 0)
-        page += "<p>ماكو اختصارات محفوظة حالياً.</p>";
-      for (uint8_t i=0; i<count; ++i) {
-        page += "<div style='padding:12px;margin:9px 0;border-radius:10px;"
-          "background:#1b3249'><b>" + String(i+1) + ". " +
-          NetworkSetup::safeHtml(items[i].name) +
-          "</b><div dir='ltr' style='text-align:right;font-variant-numeric:tabular-nums'>" +
-          NetworkSetup::safeHtml(items[i].datetime) + "</div></div>";
+      String page=zkPageBegin("إدارة الاختصارات");
+      page += "<p class='muted'>نفس محرر الأوامر الموجود في CONNECT: إضافة، تعديل، حذف ثم حفظ.</p>"
+        "<p class='note'>الحذف أو الإضافة ينحفظان فقط بعد الضغط على «حفظ الاختصارات».</p>"
+        "<form method='post' action='/presets' id='shortcuts-form'>"
+        "<div class='toolbar'><h3>الأوامر <span id='shortcut-count'></span> / 8</h3>"
+        "<button type='button' class='alt' onclick='addShortcut()' id='add-shortcut'>+ إضافة</button></div>";
+      for(uint8_t i=0;i<kMax;++i){
+        const bool visible=i<count;
+        page += "<fieldset class='shortcut-row' data-shortcut='1'";
+        if(!visible)page += " hidden";
+        page += "><div class='toolbar'><b>اختصار " + String(i+1) +
+          "</b><button type='button' class='danger' onclick='deleteShortcut(this)'>حذف</button></div>"
+          "<label>اسم الاختصار</label>"
+          "<input name='n"+String(i)+"' maxlength='24' placeholder='اسم الأمر' value='"+
+          NetworkSetup::safeHtml(visible?items[i].name:String(""))+"' required>"
+          "<label>التاريخ والوقت</label>"
+          "<input name='v"+String(i)+"' type='datetime-local' step='1' value='"+
+          NetworkSetup::safeHtml(visible?items[i].datetime:String(""))+"' required>"
+          "</fieldset>";
       }
-      page += "<div style='padding:12px;background:#1b3249;border-radius:10px'>"
-        "<b>مزامنة من ساعة M5 RTC</b><p>تستخدم الساعة الداخلية بعد معايرتها من الهاتف.</p>"
-        "</div>";
-      page += "<p>للتنفيذ من الجهاز: اختر الاختصار بالزر A ثم اضغط B مطولاً. "
-        "نسخة القراءة فقط تعرض الاختصارات ولكن لا تغيّر ساعة البصمة.</p>";
-      if (editable) {
-        page += "<h3>تعديل الأوامر</h3>"
-          "<form method='post' action='/presets'>";
-        for (uint8_t i=0; i<kMax; ++i) {
-          page += "<fieldset><legend>اختصار " + String(i+1) + "</legend>"
-            "<input name='n" + String(i) + "' maxlength='24' placeholder='اسم الأمر' value='" +
-            NetworkSetup::safeHtml(items[i].name) + "'>"
-            "<input name='v" + String(i) + "' type='datetime-local' step='1' value='" +
-            NetworkSetup::safeHtml(items[i].datetime) + "'></fieldset>";
-        }
-        page += "<button type='submit'>حفظ الاختصارات على M5</button></form>"
-          "<h3>استيراد من الماك</h3>"
-          "<p>كل سطر: اسم|YYYY-MM-DDTHH:MM:SS</p>"
-          "<form action='/presets/import' method='post'>"
-          "<textarea name='bulk' rows='8' maxlength='1600'></textarea>"
-          "<button type='submit'>استيراد الأوامر</button></form>";
-      } else {
-        page += "<p style='background:#393023;padding:12px'>التعديل متاح فقط "
-          "من شبكة إعداد M5 الخاصة (SETUP)، مو من واي فاي الجامعة المفتوح.</p>";
-      }
+      page += "<button class='action' type='submit'>حفظ الاختصارات</button></form>"
+        "<div class='card'><h3>مزامنة من ساعة M5 RTC</h3>"
+        "<p class='muted'>هذا الاختصار متاح دائماً بعد معايرة الساعة الداخلية.</p>"
+        "<p class='muted'>على M5: اختار A ثم اضغط B حوالي 0.7 ثانية للتنفيذ.</p></div>"
+        "<div class='card'><h3>استيراد من ملف نصي</h3>"
+        "<p class='muted'>كل سطر: اسم|YYYY-MM-DDTHH:MM:SS</p>"
+        "<form action='/presets/import' method='post'>"
+        "<textarea name='bulk' rows='5' maxlength='1600'></textarea>"
+        "<button type='submit'>استيراد الأوامر</button></form></div>"
+        "<script>"
+        "const shortcutRows=()=>Array.from(document.querySelectorAll('[data-shortcut]'));"
+        "function updateShortcutCount(){"
+        "const count=shortcutRows().filter(row=>!row.hidden).length;"
+        "document.getElementById('shortcut-count').textContent=count;"
+        "document.getElementById('add-shortcut').disabled=count>=8;"
+        "}"
+        "function deleteShortcut(btn){"
+        "const row=btn.closest('fieldset');"
+        "row.querySelectorAll('input').forEach(input=>input.value='');"
+        "row.hidden=true;updateShortcutCount();"
+        "}"
+        "function addShortcut(){"
+        "const row=shortcutRows().find(row=>row.hidden);"
+        "if(!row)return;row.hidden=false;"
+        "row.querySelector('input').focus();updateShortcutCount();"
+        "}"
+        "document.getElementById('shortcuts-form').onsubmit=()=>{"
+        "shortcutRows().filter(row=>row.hidden).forEach(row=>"
+        "row.querySelectorAll('input').forEach(input=>input.value=''));"
+        "return true;};"
+        "updateShortcutCount();"
+        "</script>";
       page += zkPageEnd();
       server.sendHeader("Cache-Control", "no-store");
       server.send(200, "text/html; charset=utf-8", page);
