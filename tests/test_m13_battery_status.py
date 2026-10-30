@@ -15,7 +15,7 @@ class BatteryUiTest(unittest.TestCase):
         self.assertIn("m5battery::hasUsbPower",MAIN)
         self.assertIn("battery.percent>=0",MAIN)
         self.assertIn("millis()-battery.at<10000",MAIN)
-        self.assertIn("NO calibrated battery % fuel-gauge",BATTERY)
+        self.assertIn("NOT a calibrated SoC",BATTERY)
         self.assertIn("std::isfinite(v)",BATTERY)
         self.assertIn("voltage_v",MAIN)
         self.assertIn("percent_estimate",MAIN)
