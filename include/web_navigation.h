@@ -72,8 +72,8 @@ inline String zkPageEnd() {
     "if(!r.ok)return;const b=await r.json();"
     "document.getElementById('batteryMini').textContent=b.valid?"
     "('بطارية ~'+b.percent_estimate+'% · '+Number(b.voltage_v).toFixed(2)"
-    "+'V'+(b.usb_power?' · USB':''))
-    :'البطارية: قراءة غير متاحة';"
+    "+'V'+(b.usb_power?' · USB':'')):"
+    "'البطارية: قراءة غير متاحة';"
     "}catch(e){}}"
     "updateSetupBattery();setInterval(updateSetupBattery,30000);"
     "</script></div></body></html>";
