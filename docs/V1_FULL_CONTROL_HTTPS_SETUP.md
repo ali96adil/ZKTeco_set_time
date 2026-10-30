@@ -14,8 +14,8 @@ If `.local` discovery fails **in SETUP only**, use `https://192.168.4.1/setup`. 
 ## Production behavior
 
 - PlatformIO **default** is `m5stickc-plus-production`, enabling real `CMD_SET_TIME`. Not read-only. Optional diagnostic/read-only environment remains available solely for troubleshooting/rollback.
-- Physical M5: A cycles presets, B long-press ~2.2s initiates one deliberate write; B hold ~4.2s confirms shifts greater than 24 hours.
-- iPhone: authenticated web UI operates without physical A+B permission. It requires an explicit tap confirmation **for every time-changing command**, with an additional confirmation on shifts greater than 24 hours. The HTTPS station API uses a one-year sliding Secure/HttpOnly/SameSite cookie, origin/CSRF protections and revocation.
+- Physical M5: A cycles presets, B long-press ~2.2s initiates one deliberate write; no second hold or additional confirmation, including for shifts over 24h.
+- iPhone: authenticated web UI operates without physical A+B permission. One tap on **Execute** immediately sends exactly one authenticated command, with no browser confirmation, and no greater-than-24h confirmation. The HTTPS station API uses a one-year sliding Secure/HttpOnly/SameSite cookie, origin/CSRF protections and revocation.
 - Clock-write **cooldown is 2 seconds after the previous attempt FINISHES**, including failures. Writes never auto-trigger at boot, network reconnect, or opening the page.
 - Each clock command reads the terminal first, creates one SDK `SET_TIME` frame, expects acknowledgement, performs a new independent GET_TIME to verify, and **never retries automatically** on an uncertain result.
 - Live `SYNC FROM M5 RTC` obtains a fresh M5 clock sample after initial ZKTeco read; if RTC calibration is expired (7 days) it refuses the write.
