@@ -51,6 +51,7 @@ bool buttonBLatched = false;
 bool buttonALatched = false;
 bool commandBusy = false;
 bool mdnsRunning = false;
+uint32_t lastMdnsRetryAt = 0;
 DNSServer setupDns;
 bool setupDnsRunning = false;
 // A normal DNS response is a fallback alongside Bonjour/mDNS on M5 AP.
@@ -947,6 +948,18 @@ void secureServiceTick() {
   serviceSetupDns();
   const bool canServe=(screenMode==ScreenMode::SETUP && net.apOn) ||
     (screenMode==ScreenMode::CONNECT && WiFi.status()==WL_CONNECTED);
+  // AP/STA mDNS may fail when the interface is still coming up. Retry
+  // occasionally, without restarting HTTPS or changing Wi-Fi settings.
+  if (canServe && !mdnsRunning && millis()-lastMdnsRetryAt >= 5000) {
+    lastMdnsRetryAt=millis();
+    if (MDNS.begin("zkclock")) {
+      MDNS.addService("https","tcp",443);
+      mdnsRunning=true;
+      Serial.println("Bonjour ready: https://zkclock.local/");
+    } else {
+      Serial.println("Bonjour unavailable: use the IP fallback");
+    }
+  }
   if(!canServe) {
     if(secureStarted){secureServer.close();secureStarted=false;}
     return;
