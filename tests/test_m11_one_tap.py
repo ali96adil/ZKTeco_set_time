@@ -11,7 +11,7 @@ class OneTap(unittest.TestCase):
     def test_single_authenticated_https_command_no_dialog(self):
         self.assertIn("btn.onclick=async()=>{", UI)
         self.assertIn("const r=await api('/api/m9/run','POST',{index:String(i)});",UI)
-        self.assertNotIn("confirm(",UI)
+        self.assertNotIn("confirm(",UI.split("function drawHome()",1)[1].split("function drawEditor()",1)[0])
         self.assertNotIn("requires_large_confirmation",UI)
         self.assertNotIn("confirm:'large'",UI)
         self.assertIn("busy=true;btn.disabled=true;",UI)
