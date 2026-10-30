@@ -101,10 +101,10 @@ class M5Presets {
           "</b><button type='button' class='danger' onclick='deleteShortcut(this)'>حذف</button></div>"
           "<label>اسم الاختصار</label>"
           "<input name='n"+String(i)+"' maxlength='24' placeholder='اسم الأمر' value='"+
-          NetworkSetup::safeHtml(visible?items[i].name:String(""))+"' required>"
+          NetworkSetup::safeHtml(visible?items[i].name:String(""))+"'"+String(visible?"":" disabled")+" required>"
           "<label>التاريخ والوقت</label>"
           "<input name='v"+String(i)+"' type='datetime-local' step='1' value='"+
-          NetworkSetup::safeHtml(visible?items[i].datetime:String(""))+"' required>"
+          NetworkSetup::safeHtml(visible?items[i].datetime:String(""))+"'"+String(visible?"":" disabled")+" required>"
           "</fieldset>";
       }
       page += "<button class='action' type='submit'>حفظ الاختصارات</button></form>"
@@ -125,12 +125,13 @@ class M5Presets {
         "}"
         "function deleteShortcut(btn){"
         "const row=btn.closest('fieldset');"
-        "row.querySelectorAll('input').forEach(input=>input.value='');"
+        "row.querySelectorAll('input').forEach(input=>{input.value='';input.disabled=true;});"
         "row.hidden=true;updateShortcutCount();"
         "}"
         "function addShortcut(){"
         "const row=shortcutRows().find(row=>row.hidden);"
         "if(!row)return;row.hidden=false;"
+        "row.querySelectorAll('input').forEach(input=>input.disabled=false);"
         "row.querySelector('input').focus();updateShortcutCount();"
         "}"
         "document.getElementById('shortcuts-form').onsubmit=()=>{"
