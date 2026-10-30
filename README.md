@@ -1,8 +1,15 @@
 # ZKTeco Clock Control — M5StickC Plus
 
-**v1.0.2 — faster 700ms M5 button and unified SETUP shortcuts · ZKTeco write needs field acceptance**
+**v1.0.3 — battery/voltage on M5 and iPhone; reliable SETUP HTTPS address**
 
-> The owner has tested real M5StickC Plus HTTPS, iPhone trust/login and session persistence across power cycle. The hardware's ZKTeco `SET_TIME` command has **not yet been verified** in this conversation. Default firmware is READ ONLY; enable `m5stickc-plus-secure-write-lab` only after a controlled protocol read/write qualification. See [v1 release notes](docs/RELEASE_V1_RC1.md).
+> Physical iPhone HTTPS, trusted CA, session across reboot and SETUP HTTPS at `https://192.168.4.1` were tested by the operator. The normal firmware is **write-enabled** (`m5stickc-plus-production`), but actual ZKTeco SET_TIME/readback on this M5 still needs live qualification; compile-only tests are not a substitute.
+
+## v1.0.3 — Battery voltage and SETUP hostname notes
+
+- AXP192 on the **original M5StickC Plus** exposes battery voltage and USB voltage, but has no calibrated charge gauge in the installed library. Display **approximate %**, the measured voltage V and `USB` when USB power is present, not necessarily actively charging.
+- Battery data appears on LCD and in both Safari UIs; refreshing every 30 seconds, with sensor sampling cached for 10 seconds.
+- In **SETUP**, use confirmed-working **`https://192.168.4.1/`** as primary URL. `https://zkclock.local/` remains the station (CONNECT) URL. Apple mDNS in an isolated SoftAP is not reliably resolvable; the firmware attempts an AP-only Wi-Fi power-save change to improve multicast, but no guarantee.
+- No changes to one-tap ZKTeco write commands, 700ms physical B hold, 2s cooldown, installed CA or persisted NVS credentials.
 
 ## v1.0.2 — Faster M5 / improved SETUP
 
