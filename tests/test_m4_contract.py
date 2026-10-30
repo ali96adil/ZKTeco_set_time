@@ -27,7 +27,7 @@ class M4Contract(unittest.TestCase):
         self.assertIn('M5.Lcd.drawString("A"',main)
         self.assertIn('M5.Lcd.drawString("B"',main)
         self.assertIn("ScreenMode::BOOT",main)
-        self.assertIn("M5.BtnB.pressedFor(2200)",main)
+        self.assertIn("M5.BtnB.pressedFor(700)",main)
         self.assertNotIn("M5.BtnB.pressedFor(4200)",main)
         self.assertNotIn("startedAt >= 30000",network)
         self.assertNotIn("millis() - startedAt",network)
