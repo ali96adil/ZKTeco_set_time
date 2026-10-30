@@ -77,7 +77,7 @@ public:
       }
       const bool editable = true;
       String page = zkPageBegin("إعدادات M5");
-      page += "<p><b>https://192.168.4.1</b> — الرابط الثابت بوضع SETUP على شبكة الـM5.</p>"
+      page += "<p><b>https://192.168.4.1/setup</b> — الرابط الثابت بوضع SETUP على شبكة الـM5.</p>"
         "<p>رابط https://zkclock.local/setup يعتمد على Bonjour؛ إذا ما يفتح استعمل عنوان الـIP أعلاه.</p>"
         "<p><a href='/auth/setup'>إدارة حساب الدخول</a> | <a href='/presets'>الاختصارات</a> | "
         "<a href='/rtc'>RTC</a></p>";
