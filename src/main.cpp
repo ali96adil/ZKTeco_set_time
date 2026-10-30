@@ -1025,6 +1025,9 @@ void loop() {
       }
       drawScreen();
     } else if (M5.BtnB.wasPressed()) {
+      // B also selects CONNECT on boot: consume this entire press so a
+      // long selection cannot accidentally execute an attendance clock write.
+      buttonBLatched = true;
       screenMode = ScreenMode::CONNECT;
       net.lastAttempt = millis() - 15000;
       drawScreen();
