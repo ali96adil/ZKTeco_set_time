@@ -77,8 +77,8 @@ public:
       }
       const bool editable = true;
       String page = zkPageBegin("إعدادات M5");
-      page += "<p><b>https://zkclock.local</b> — نفس الرابط بالوضعين.</p>"
-        "<p>إذا Bonjour ما اشتغل، افتح https://192.168.4.1/setup (شهادة TLS تشمل عنوان الـAP).</p>"
+      page += "<p class='note'>رابط SETUP المضمون على شبكة الـM5: <b>https://192.168.4.1/</b></p>"
+        "<p class='muted'>zkclock.local يعمل عادةً في CONNECT؛ في SETUP يعتمد على دعم Bonjour/mDNS بالآيفون وقد لا ينفتح. عنوان IP يستخدم نفس شهادة HTTPS الموثوقة.</p>"
         "<p><a href='/auth/setup'>إدارة حساب الدخول</a> | <a href='/presets'>الاختصارات</a> | "
         "<a href='/rtc'>RTC</a></p>";
       page += "<p>الحالة: <b>" + String(editable ? "شبكة الإعداد الآمنة" : "الاتصال بالشبكة") + "</b></p>";
