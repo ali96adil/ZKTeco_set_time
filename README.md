@@ -11,7 +11,7 @@
 - **Default USB build:** `m5stickc-plus-production` — clock writing enabled on the M5's B button and on the authenticated iPhone HTTPS screen. Read-only remains optional for diagnostics, **not the normal release**.
 - **One HTTPS URL:** `https://zkclock.local` on both M5 modes. In A / SETUP, it opens `/setup` on the private WPA2 AP; in B / CONNECT, it opens the authenticated operator dashboard. If Bonjour fails in SETUP, use `https://192.168.4.1/setup` (TLS SAN covers this address).
 - **2-second write cooldown**, measured after the previous attempt completes. Independent SDK read after a clock-write and no automatic retry.
-- Physical B hold ~2.2 seconds; >24h correction requires longer confirmation. On the iPhone, every clock change requires confirmation, with an additional check for >24h.
+- Physical B hold ~2.2 seconds initiates any valid date adjustment. On iPhone, one tap executes any saved shortcut directly — no dialogs, including for differences greater than 24 hours. The independent readback and 2-second cooldown remain.
 - The same existing locally trusted M5 certificate is used across both modes. **Never regenerate the certificate merely to upgrade Firmware.**
 - The M9 physical HTTPS/login/reboot tests succeeded; M10's real ZKTeco write and physical SETUP HTTPS still require a controlled acceptance test.
 
