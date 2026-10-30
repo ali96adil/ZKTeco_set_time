@@ -38,7 +38,7 @@ class M12HardwareFeedback(unittest.TestCase):
 
     def test_setup_looks_like_connect(self):
         self.assertIn(".tabs{position:sticky",NAV)
-        self.assertIn(".shortcut",PRE)
+        self.assertIn("shortcut-row",PRE)
         self.assertIn("button.danger",NAV)
         self.assertIn("fieldset[hidden]{display:none}",NAV)
         self.assertIn("class='tabs'",NAV)
