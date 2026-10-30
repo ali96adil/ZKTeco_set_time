@@ -60,7 +60,21 @@ inline String zkPageBegin(const String& title) {
     ".note{padding:11px 12px;background:#20354a;border-radius:11px;font-size:13px;color:#c6d9eb}"
     "p{line-height:1.65}a{color:#b2dbff}"
     "</style></head><body><div class='wrap'>"
-    "<div class='brand'>ZKTeco / M5StickC Plus · HTTPS SETUP</div>"
+    "<div class='brand'>ZKTeco / M5StickC Plus · HTTPS SETUP"
+    " <span id='batteryMini' style='float:left'>البطارية: —</span></div>"
     "<h1>"+title+"</h1>"+zkNav();
 }
-inline String zkPageEnd() { return "</div></body></html>"; }
+inline String zkPageEnd() {
+  return "<p class='muted'>نسبة البطارية تقريبية اعتماداً على فولتية AXP192 وليست مقياس سعة دقيقاً.</p>"
+    "<script>"
+    "async function updateSetupBattery(){"
+    "try{const r=await fetch('/api/battery',{cache:'no-store'});"
+    "if(!r.ok)return;const b=await r.json();"
+    "document.getElementById('batteryMini').textContent=b.valid?"
+    "('بطارية ~'+b.percent_estimate+'% · '+Number(b.voltage_v).toFixed(2)"
+    "+'V'+(b.usb_power?' · USB':''))
+    :'البطارية: قراءة غير متاحة';"
+    "}catch(e){}}"
+    "updateSetupBattery();setInterval(updateSetupBattery,30000);"
+    "</script></div></body></html>";
+}
