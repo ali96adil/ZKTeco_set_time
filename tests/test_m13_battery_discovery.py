@@ -25,6 +25,8 @@ class BatteryAndDiscovery(unittest.TestCase):
         self.assertIn("https://zkclock.local/setup", SETUP)
         self.assertIn("fetch('/api/battery'", SETUP)
         self.assertIn('MDNS.begin("zkclock")', MAIN)
+        self.assertIn("lastMdnsRetryAt", MAIN)
+        self.assertIn("canServe && !mdnsRunning", MAIN)
         self.assertIn('ESPWebServerSecure secureServer(443)', MAIN)
 
     def test_iphone_battery_and_attendance_safety(self):
