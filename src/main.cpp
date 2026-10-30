@@ -21,6 +21,7 @@
 #include "m9_secure_ui.h"
 #include "m9_login_ui.h"
 #include "m5_tls_local.h"
+#include "m5_battery_estimate.h"
 #include "zk_sessions.h"
 #ifndef ZK_ENABLE_M5_TIME_WRITE
 #define ZK_ENABLE_M5_TIME_WRITE 0
@@ -70,6 +71,48 @@ bool hasClockWriteAttempt = false;
 constexpr uint32_t kClockWriteCooldownMs = 2000;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
+
+// AXP192 voltage ADC is available on the original M5StickC Plus; there is
+// NO calibrated battery % fuel-gauge. Cache to avoid reading I2C each frame.
+struct BatterySample {
+  float voltage=0.0f;
+  float vbus=0.0f;
+  int percent=-1;
+  bool usb=false;
+  bool sampled=false;
+  uint32_t at=0;
+} battery;
+
+void sampleBattery() {
+  if(battery.sampled && millis()-battery.at<10000) return;
+  battery.voltage=M5.Axp.GetBatVoltage();
+  battery.vbus=M5.Axp.GetVBusVoltage();
+  battery.percent=m5battery::estimatePercent(battery.voltage);
+  battery.usb=m5battery::hasUsbPower(battery.vbus);
+  battery.sampled=true;
+  battery.at=millis();
+}
+
+String batteryJson() {
+  sampleBattery();
+  String out="{\"ok\":true,\"estimated\":true,\"valid\":";
+  out+=(battery.percent>=0?"true":"false");
+  out+=",\"percent_estimate\":";
+  out+=(battery.percent>=0?String(battery.percent):String("null"));
+  out+=",\"voltage_v\":";
+  out+=(battery.percent>=0?String(battery.voltage,3):String("null"));
+  out+=",\"usb_power\":";
+  out+=(battery.usb?"true":"false");
+  out+="}";
+  return out;
+}
+
+String batteryLabel() {
+  sampleBattery();
+  if(battery.percent<0) return "BAT --";
+  return "~"+String(battery.percent)+"%"+(battery.usb?" USB":"");
+}
+
 
 bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   const uint32_t start = millis();
@@ -556,6 +599,7 @@ void drawSetupQr() {
   M5.Lcd.setTextColor(WHITE,BLACK);
   M5.Lcd.setTextSize(1);
   M5.Lcd.drawString("JOIN WIFI",133,9,2);
+  M5.Lcd.drawString(batteryLabel(),133,91,1);
   M5.Lcd.drawString("SCAN QR",133,32,2);
   M5.Lcd.drawString("HTTPS",133,58,2);
   M5.Lcd.drawString("zkclock.local",133,76,1);
@@ -568,6 +612,7 @@ void drawSetupPassword() {
   M5.Lcd.setTextColor(WHITE,BLACK);
   M5.Lcd.setTextSize(1);
   M5.Lcd.drawString("SETUP WIFI",8,3,2);
+  M5.Lcd.drawString(batteryLabel(),154,4,1);
   M5.Lcd.drawFastHLine(8,26,224,0x34BF);
   M5.Lcd.setTextColor(0x9D9F,BLACK);
   M5.Lcd.drawString("NETWORK NAME",8,31,1);
@@ -593,6 +638,7 @@ void drawScreen() {
   M5.Lcd.setTextSize(1);
   if (screenMode == ScreenMode::BOOT) {
     M5.Lcd.drawString("ZKTeco CLOCK",10,6,2);
+    M5.Lcd.drawString(batteryLabel(),171,12,1);
     M5.Lcd.drawFastHLine(10,30,220,0x34BF);
     M5.Lcd.fillRoundRect(8,38,224,39,6,0x13A5);
     M5.Lcd.drawString("A",17,49,4);
@@ -608,6 +654,7 @@ void drawScreen() {
     return;
   }
   M5.Lcd.drawString("ZKTeco CLOCK",7,3,2);
+  M5.Lcd.drawString(batteryLabel(),172,7,1);
   M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ? "WIFI CONNECTED" : "CONNECTING...",7,23,2);
   if (WiFi.status()==WL_CONNECTED)
     M5.Lcd.drawString("https://zkclock.local",7,43,1);
@@ -764,6 +811,12 @@ void initSecureRoutes() {
       ZkSessions::parseCookie(secureServer.header("Cookie"))));
     secureServer.sendHeader("Cache-Control","no-store");
     secureServer.send_P(200,"text/html; charset=utf-8",M9_HOME);
+  });
+  // AP setup pages can read power without enrollment; CONNECT needs session.
+  // This is a read-only endpoint and does not reveal Wi-Fi secrets.
+  secureServer.on("/api/battery",HTTP_GET,[](){
+    if(!(screenMode==ScreenMode::SETUP && net.apOn) && !allowedHttps())return;
+    secureJson(200,batteryJson());
   });
   secureServer.on("/api/m9",HTTP_GET,[](){
     if(!allowedHttps())return;
