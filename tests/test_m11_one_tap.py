@@ -19,7 +19,7 @@ class OneTap(unittest.TestCase):
         self.assertIn("message(r.message||'تم إرسال الأمر وفحص ساعة البصمة'",UI)
 
     def test_single_physical_b_hold_any_datetime(self):
-        self.assertIn("M5.BtnB.pressedFor(2200)",SRC)
+        self.assertIn("M5.BtnB.pressedFor(700)",SRC)
         self.assertNotIn("M5.BtnB.pressedFor(4200)",SRC)
         self.assertNotIn("longShiftHold",SRC)
         self.assertIn("executeSelected();",SRC)

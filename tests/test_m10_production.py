@@ -18,7 +18,7 @@ class ProductionContracts(unittest.TestCase):
         self.assertIn("build_flags = -DZK_ENABLE_M5_TIME_WRITE=1",PIO)
         self.assertIn('secureServer.on("/api/m9/run",HTTP_POST',SRC)
         self.assertIn('executeSelected()',SRC)
-        self.assertIn('M5.BtnB.pressedFor(2200)',SRC)
+        self.assertIn('M5.BtnB.pressedFor(700)',SRC)
         self.assertIn('makeSetTimeFrame(session, reply.replyId, encoded, frame)',SRC)
         self.assertIn("verified = acknowledged && valid",SRC)
         self.assertIn("if (selectedPreset == stored.count && !rtcClock.trustworthy(target))",SRC)
