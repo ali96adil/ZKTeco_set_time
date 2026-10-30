@@ -50,6 +50,7 @@ class M12HardwareFeedback(unittest.TestCase):
         self.assertIn("wakeBlockUntilRelease = true;",SRC)
         self.assertIn("if (wakeBlockUntilRelease)",SRC)
         self.assertIn("if (!buttonBLatched && M5.BtnB.pressedFor(700))",SRC)
+        self.assertIn("buttonBLatched = true;\n      screenMode = ScreenMode::CONNECT;",SRC)
         self.assertIn("buttonBLatched = true;",SRC)
         self.assertIn("executeSelected();",SRC)
         self.assertIn("kClockWriteCooldownMs = 2000",SRC)
