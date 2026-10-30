@@ -8,6 +8,7 @@
 #include <ESPWebServer.hpp>
 #include <ESPWebServerSecure.hpp>
 #include <ESPmDNS.h>
+#include <DNSServer.h>
 #include <M5StickCPlus.h>
 #include <qrcode.h>
 #include "config.h"
@@ -50,6 +51,17 @@ bool buttonBLatched = false;
 bool buttonALatched = false;
 bool commandBusy = false;
 bool mdnsRunning = false;
+DNSServer setupDns;
+bool setupDnsRunning = false;
+// A normal DNS response is a fallback alongside Bonjour/mDNS on M5 AP.
+// iOS may choose multicast .local resolution and bypass this DNS responder.
+void stopSetupDns() {
+  if (setupDnsRunning) { setupDns.stop(); setupDnsRunning=false; }
+}
+void serviceSetupDns() {
+  if (screenMode==ScreenMode::SETUP && net.apOn && setupDnsRunning)
+    setupDns.processNextRequest();
+}
 bool showSetupQr = true;
 uint32_t lastWifiAttempt = 0;
 uint32_t lastHttpRead = 0;
@@ -886,6 +898,7 @@ void initSecureRoutes() {
                                     kM5TlsServerCert,sizeof(kM5TlsServerCert));
 }
 void secureServiceTick() {
+  serviceSetupDns();
   const bool canServe=(screenMode==ScreenMode::SETUP && net.apOn) ||
     (screenMode==ScreenMode::CONNECT && WiFi.status()==WL_CONNECTED);
   if(!canServe) {
@@ -997,8 +1010,13 @@ void loop() {
       if(secureStarted){secureServer.close();secureStarted=false;}
       net.startAP();
       if (net.apOn) {
-        // Advertise the same friendly address in setup mode when phone/mDNS
-        // supports it. The documented 192.168.4.1 fallback always remains.
+        // In AP mode answer both Bonjour multicast and ordinary DNS.
+        // Never redirect or downgrade HTTPS: same trusted cert, same port 443.
+        stopSetupDns();
+        setupDnsRunning=setupDns.start(53,"zkclock.local",WiFi.softAPIP());
+        Serial.println(setupDnsRunning ?
+          "SETUP AP DNS responder ready for zkclock.local" :
+          "SETUP AP DNS unavailable; use HTTPS 192.168.4.1");
         if (!mdnsRunning && MDNS.begin("zkclock")) {
           MDNS.addService("https","tcp",443);
           mdnsRunning = true;
@@ -1024,6 +1042,7 @@ void loop() {
     if (M5.BtnB.pressedFor(2000) && !buttonBLatched) {
       buttonBLatched = true;
       if (mdnsRunning) { MDNS.end(); mdnsRunning = false; }
+      stopSetupDns();
       if(secureStarted){secureServer.close();secureStarted=false;}
       net.stopAP();
       screenMode = ScreenMode::BOOT;
@@ -1044,7 +1063,9 @@ void loop() {
     }
     if (!M5.BtnA.isPressed()) buttonALatched = false;
 
-    if (!buttonBLatched && M5.BtnB.pressedFor(2200)) {
+    if (!buttonBLatched && M5.BtnB.pressedFor(700)) {
+      // A short intentional 700ms B hold runs the selected command once;
+      // a sleep-screen wake still consumes the entire press.
       // A single physical B hold runs the selected command once, regardless
       // of the time delta. It never runs automatically on boot or wake.
       buttonBLatched = true;
