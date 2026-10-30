@@ -33,7 +33,7 @@ class M8Contracts(unittest.TestCase):
         self.assertIn('MDNS.begin("zkclock")',SRC)
     def test_no_automatic_write(self):
         self.assertNotIn("setInterval(()=>",WEB)
-        self.assertIn("M5.BtnB.pressedFor(2200)",SRC)
+        self.assertIn("M5.BtnB.pressedFor(700)",SRC)
         self.assertIn("if(screenMode==ScreenMode::SETUP && net.apOn)",SRC)
         self.assertIn('secureServer.send_P(200',SRC)
 
