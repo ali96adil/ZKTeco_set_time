@@ -1,8 +1,15 @@
 # ZKTeco Clock Control — M5StickC Plus
 
-**v1.0.0 — full-control production source · physical HTTPS/login verified · time writing needs field acceptance**
+**v1.0.1 — one-tap full-control production · physical HTTPS/login verified · ZKTeco write needs field acceptance**
 
 > The owner has tested real M5StickC Plus HTTPS, iPhone trust/login and session persistence across power cycle. The hardware's ZKTeco `SET_TIME` command has **not yet been verified** in this conversation. Default firmware is READ ONLY; enable `m5stickc-plus-secure-write-lab` only after a controlled protocol read/write qualification. See [v1 release notes](docs/RELEASE_V1_RC1.md).
+
+## v1.0.1 — One-tap command execution
+
+- After the operator logs in on iPhone, **one tap** on any saved command runs it immediately through `https://zkclock.local`. There are **no browser confirmation dialogs** and no exception for shifts beyond 24 hours.
+- On M5, select with A and hold B about **2.2 seconds** for one execution; no second 4.2-second hold is required even for large time shifts.
+- No automatic writes, no blind retries, read-before-write and fresh verified readback are retained, as is the **2-second post-attempt cooldown**.
+- The default PlatformIO image `m5stickc-plus-production` remains write-enabled. M5 SETUP and CONNECT use the same certificate and URL `https://zkclock.local`.
 
 ## M10 — Complete HTTPS M5 production build
 
