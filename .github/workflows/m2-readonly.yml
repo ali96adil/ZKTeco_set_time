@@ -1,8 +1,8 @@
-name: M5StickC Plus v1.0.2 SETUP UX + faster B
+name: M5StickC Plus M13 battery and SETUP discovery
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session, release/v1.0.0-rc1, release/v1.0.0-full-control, release/v1.0.1-one-tap, release/v1.0.2-setup-ux]
+    branches: [main, feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session, release/v1.0.0-rc1, release/v1.0.0-full-control, release/v1.0.1-one-tap, release/v1.0.2-setup-ux]
   pull_request:
 
 permissions:
@@ -52,6 +52,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_m11_*.py' -v
       - name: M12 setup Bonjour DNS and delete shortcuts, 700ms B
         run: python3 -m unittest discover -s tests -p 'test_m12_*.py' -v
+      - name: M13 battery read-only access and SETUP URL fallback
+        run: python3 -m unittest discover -s tests -p 'test_m13_*.py' -v
       - name: M5 Home Screen metadata and RTC availability contract
         run: python3 -m unittest discover -s tests -p 'test_m5_home_rtc.py' -v
       - name: Check local hostname certificate scripts
