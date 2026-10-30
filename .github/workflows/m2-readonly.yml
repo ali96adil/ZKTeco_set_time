@@ -2,7 +2,7 @@ name: M5StickC Plus M13 battery and SETUP discovery
 
 on:
   push:
-    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session, release/v1.0.0-rc1, release/v1.0.0-full-control, release/v1.0.1-one-tap, release/v1.0.2-setup-ux, feature/m13-battery-status]
+    branches: [feature/m1-read-only, feature/m2-mobile-preview, feature/mac-live-control, feature/m3-network-presets, feature/m4-boot-ui-presets, feature/m5-home-rtc, feature/m6-display-qr, feature/m7-web-navigation-display-sleep, feature/m8-fast-home-local-edit, feature/m9-https-persistent-session, release/v1.0.0-rc1, release/v1.0.0-full-control, release/v1.0.1-one-tap, release/v1.0.2-setup-ux, feature/m13-battery-status, release/v1.0.3-battery-status]
   pull_request:
 
 permissions:
