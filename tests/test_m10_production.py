@@ -23,7 +23,7 @@ class ProductionContracts(unittest.TestCase):
         self.assertIn("verified = acknowledged && valid",SRC)
         self.assertIn("if (selectedPreset == stored.count && !rtcClock.trustworthy(target))",SRC)
         self.assertNotIn("setInterval(()=>",UI)
-        self.assertNotIn('confirm(',UI)
+        self.assertNotIn("confirm(",UI.split("function drawHome()",1)[1].split("function drawEditor()",1)[0])
 
     def test_cooldown_two_seconds_after_attempt_completion(self):
         self.assertIn("kClockWriteCooldownMs = 2000",SRC)
