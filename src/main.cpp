@@ -71,6 +71,32 @@ constexpr uint32_t kClockWriteCooldownMs = 2000;
 String statusLine = "BOOT";
 String lastClock = "--:--:--";
 
+// AXP192 reports voltage, not calibrated battery state-of-charge.
+// Percentage is approximate, especially while charging.
+struct BatteryStatus { int percent; int millivolts; bool usbPower; };
+BatteryStatus readBattery() {
+  const float v=M5.Axp.GetBatVoltage();
+  const float vbus=M5.Axp.GetVBusVoltage();
+  BatteryStatus b{-1,-1,vbus>=4.4f};
+  if (!(v>=2.5f && v<=4.5f)) return b;
+  b.millivolts=static_cast<int>(v*1000.0f+0.5f);
+  static const float volts[]={3.30f,3.60f,3.70f,3.80f,3.90f,4.00f,4.10f,4.20f};
+  static const int levels[]={0,5,15,35,55,75,90,100};
+  if(v<=volts[0]){b.percent=0;return b;}
+  for(int i=1;i<8;++i){
+    if(v<=volts[i]){
+      const float t=(v-volts[i-1])/(volts[i]-volts[i-1]);
+      b.percent=levels[i-1]+static_cast<int>((levels[i]-levels[i-1])*t+0.5f);
+      return b;
+    }
+  }
+  b.percent=100;return b;
+}
+String batteryScreenLabel(){
+  const BatteryStatus b=readBattery();
+  return b.percent>=0 ? "BAT ~"+String(b.percent)+"%" : "BAT --";
+}
+
 bool readExact(WiFiClient &client, uint8_t *out, size_t count) {
   const uint32_t start = millis();
   size_t done = 0;
@@ -558,7 +584,8 @@ void drawSetupQr() {
   M5.Lcd.drawString("JOIN WIFI",133,9,2);
   M5.Lcd.drawString("SCAN QR",133,32,2);
   M5.Lcd.drawString("HTTPS",133,58,2);
-  M5.Lcd.drawString("zkclock.local",133,76,1);
+  M5.Lcd.drawString("192.168.4.1",133,76,1);
+  M5.Lcd.drawString(batteryScreenLabel(),133,88,1);
   M5.Lcd.drawString("A: PASS",133,101,2);
   M5.Lcd.drawString("B hold: exit",133,121,1);
 }
@@ -568,6 +595,7 @@ void drawSetupPassword() {
   M5.Lcd.setTextColor(WHITE,BLACK);
   M5.Lcd.setTextSize(1);
   M5.Lcd.drawString("SETUP WIFI",8,3,2);
+  M5.Lcd.drawString(batteryScreenLabel(),175,10,1);
   M5.Lcd.drawFastHLine(8,26,224,0x34BF);
   M5.Lcd.setTextColor(0x9D9F,BLACK);
   M5.Lcd.drawString("NETWORK NAME",8,31,1);
@@ -584,7 +612,7 @@ void drawSetupPassword() {
   M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(0xBDF7,BLACK);
   M5.Lcd.drawString("type both parts without space",8,109,1);
-  M5.Lcd.drawString("https://zkclock.local",8,121,1);
+  M5.Lcd.drawString("https://192.168.4.1",8,121,1);
 }
 
 void drawScreen() {
@@ -593,6 +621,7 @@ void drawScreen() {
   M5.Lcd.setTextSize(1);
   if (screenMode == ScreenMode::BOOT) {
     M5.Lcd.drawString("ZKTeco CLOCK",10,6,2);
+    M5.Lcd.drawString(batteryScreenLabel(),175,12,1);
     M5.Lcd.drawFastHLine(10,30,220,0x34BF);
     M5.Lcd.fillRoundRect(8,38,224,39,6,0x13A5);
     M5.Lcd.drawString("A",17,49,4);
@@ -608,9 +637,12 @@ void drawScreen() {
     return;
   }
   M5.Lcd.drawString("ZKTeco CLOCK",7,3,2);
+  M5.Lcd.drawString(batteryScreenLabel(),175,5,1);
   M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ? "WIFI CONNECTED" : "CONNECTING...",7,23,2);
-  if (WiFi.status()==WL_CONNECTED)
+  if (WiFi.status()==WL_CONNECTED) {
     M5.Lcd.drawString("https://zkclock.local",7,43,1);
+    M5.Lcd.drawString(WiFi.localIP().toString(),143,43,1);
+  }
   stored.load();
   if (selectedPreset > stored.count) selectedPreset = 0;
   M5.Lcd.drawString(String(selectedPreset + 1) + "/" + String(stored.count+1),7,63,2);
@@ -713,6 +745,16 @@ void initSecureRoutes() {
     secureServer.send(200,"text/html; charset=utf-8",page);
   });
 
+  // Battery status is read-only: protected SETUP Wi-Fi or authenticated CONNECT.
+  secureServer.on("/api/battery",HTTP_GET,[](){
+    if (!(screenMode==ScreenMode::SETUP && net.apOn) && !allowedHttps())
+      return;
+    const BatteryStatus b=readBattery();
+    secureJson(200,"{\"ok\":true,\"percent_approx\":"+String(b.percent)+
+      ",\"voltage_mv\":"+String(b.millivolts)+
+      ",\"usb_power\":"+String(b.usbPower?"true":"false")+"}");
+  });
+
   // PWA resources must be served over the same authenticated HTTPS origin.
   secureServer.on("/manifest.webmanifest",HTTP_GET,[](){
     secureServer.sendHeader("Cache-Control","public, max-age=3600");
@@ -770,8 +812,12 @@ void initSecureRoutes() {
     stored.load();
     zkwire::CivilTime current;
     bool ready=rtcClock.trustworthy(current);
+    const BatteryStatus b=readBattery();
     String result="{\"ok\":true,\"authenticated\":true,\"csrf\":\""+
-      csrfToken+"\",\"write_enabled\":"+
+      csrfToken+"\",\"battery_percent\":"+String(b.percent)+
+      ",\"battery_mv\":"+String(b.millivolts)+
+      ",\"usb_power\":"+String(b.usbPower?"true":"false")+
+      ",\"write_enabled\":"+
       String(ZK_ENABLE_M5_TIME_WRITE ? "true" : "false")+
       ",\"ssid\":\""+zkJsonEscape(net.ssid)+
       "\",\"zk_ip\":\""+zkJsonEscape(net.zkIp)+
