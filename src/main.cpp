@@ -47,7 +47,6 @@ enum class ScreenMode { BOOT, SETUP, CONNECT };
 ScreenMode screenMode = ScreenMode::BOOT;
 uint8_t selectedPreset = 0;
 bool buttonBLatched = false;
-bool longShiftHold = false;
 bool buttonALatched = false;
 bool commandBusy = false;
 bool mdnsRunning = false;
@@ -186,9 +185,9 @@ bool parseCivil(const String& str, zkwire::CivilTime& t) {
   return true;
 }
 
-enum class RunResult { COMPLETED, NEED_LONG_HOLD, FAILED };
+enum class RunResult { COMPLETED, FAILED };
 
-RunResult executeSelected(bool allowLargeShift) {
+RunResult executeSelected() {
   if (screenMode != ScreenMode::CONNECT || commandBusy) return RunResult::FAILED;
   if (WiFi.status() != WL_CONNECTED) {
     statusLine = "NO WIFI / ZK UNREACHABLE";
@@ -223,11 +222,9 @@ RunResult executeSelected(bool allowLargeShift) {
     statusLine = "RTC CALIBRATION EXPIRED";
     return RunResult::FAILED;
   }
-  int64_t delta = zkwire::civilSeconds(target) - zkwire::civilSeconds(before);
-  if ((delta > 86400LL || delta < -86400LL) && !allowLargeShift) {
-    statusLine = "LARGE SHIFT: HOLD B 4s";
-    return RunResult::NEED_LONG_HOLD;
-  }
+  // One deliberate operator action executes any valid stored full datetime,
+  // even when the adjustment exceeds 24 hours. No second confirmation.
+  // Keep the read-before-write, valid time and independent readback safeguards.
 #if ZK_ENABLE_M5_TIME_WRITE
   // Only locally deliberate B-hold or authenticated HTTPS /api/m9/run may
   // enter. Never write automatically, never retry an uncertain write.
@@ -862,12 +859,7 @@ void initSecureRoutes() {
     }
 #if ZK_ENABLE_M5_TIME_WRITE
     selectedPreset=index;
-    const bool large=secureServer.arg("confirm")=="large";
-    RunResult result=executeSelected(large);
-    if(result==RunResult::NEED_LONG_HOLD) {
-      secureJson(200,"{\"ok\":true,\"requires_large_confirmation\":true,"
-        "\"message\":\"فرق أكبر من 24 ساعة؛ يحتاج تأكيد\"}");return;
-    }
+    RunResult result=executeSelected();
     if(result==RunResult::COMPLETED) {
       secureJson(200,"{\"ok\":true,\"verified\":true,"
         "\"message\":\"تم تعديل ساعة البصمة والتحقق منها\"}");
@@ -1052,26 +1044,14 @@ void loop() {
     }
     if (!M5.BtnA.isPressed()) buttonALatched = false;
 
-    if (!buttonBLatched) {
-      if (!longShiftHold && M5.BtnB.pressedFor(2200)) {
-        RunResult result = executeSelected(false);
-        if (result == RunResult::NEED_LONG_HOLD)
-          longShiftHold = true;
-        else
-          buttonBLatched = true;
-        drawScreen();
-      }
-      if (longShiftHold && M5.BtnB.pressedFor(4200)) {
-        executeSelected(true);
-        buttonBLatched = true;
-        longShiftHold = false;
-        drawScreen();
-      }
+    if (!buttonBLatched && M5.BtnB.pressedFor(2200)) {
+      // A single physical B hold runs the selected command once, regardless
+      // of the time delta. It never runs automatically on boot or wake.
+      buttonBLatched = true;
+      executeSelected();
+      drawScreen();
     }
-    if (!M5.BtnB.isPressed()) {
-      buttonBLatched = false;
-      longShiftHold = false;
-    }
+    if (!M5.BtnB.isPressed()) buttonBLatched = false;
   }
   secureServiceTick();
   delay(15);
