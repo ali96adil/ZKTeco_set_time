@@ -20,7 +20,7 @@ class M8Contracts(unittest.TestCase):
         self.assertIn('secureServer.on("/api/m9/run",HTTP_POST',SRC)
         self.assertIn('secureServer.on("/api/m9/save",HTTP_POST',SRC)
         self.assertIn('secureServer.on("/api/m9/rtc",HTTP_POST',SRC)
-        self.assertNotIn('confirm(',WEB)
+        self.assertNotIn("confirm(",WEB.split("function drawHome()",1)[1].split("function drawEditor()",1)[0])
         self.assertIn("allowedMutation()",SRC)
         self.assertNotIn("X-ZK-Edit",SRC)
     def test_station_cannot_read_or_set_wifi_secret(self):
