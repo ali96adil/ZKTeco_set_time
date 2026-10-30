@@ -44,7 +44,7 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 [hidden]{display:none!important}
 </style></head><body>
 <div class="wrap">
-<header class="top"><div><small>ZKTeco / M5StickC Plus</small><h1>التحكم بالساعة</h1></div><span class="status"><span id="modeState">ZK CLOCK</span></span></header>
+<header class="top"><div><small>ZKTeco / M5StickC Plus</small><h1>التحكم بالساعة</h1></div><div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end"><span class="status" id="batteryState">بطارية —</span><span class="status"><span id="modeState">ZK CLOCK</span></span></div></header>
 <nav class="tabbar" aria-label="الصفحات">
 <button data-tab="home" class="active">الرئيسية</button>
 <button data-tab="presets">الأوامر</button>
@@ -92,8 +92,8 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <option value="0">بدون نوم</option>
 </select>
 <button class="action" id="saveSettings">حفظ الاسم والنوم</button>
-<p class="note">اسم شبكة الإعداد يتفعّل عند دخول SETUP مرة ثانية. لتغيير Wi-Fi أو حساب الجهاز، اختار A — SETUP على الـM5 واتصل بشبكته؛ افتح نفس العنوان https://zkclock.local.</p>
-<p class="note">رابط الإعدادات في وضع SETUP: https://zkclock.local/setup. البديل إذا mDNS غير متوفر: https://192.168.4.1/setup.</p>
+<p class="note">لإعداد Wi-Fi أو حساب الجهاز، اختار A — SETUP على الـM5 واتصل بشبكته، ثم افتح https://192.168.4.1/setup.</p>
+<p class="note">عنوان https://zkclock.local يعتمد على Bonjour وقد لا يشتغل ببعض الشبكات. في وضع CONNECT يعرض الـM5 عنوان IP الحالي أيضاً. نسبة البطارية تقديرية.</p>
 </div>
 </section>
 <section id="rtc" hidden>
@@ -182,6 +182,11 @@ async function refresh(){
  try{
    state=await api('/api/m9');
    el('modeState').textContent=state.write_enabled?'تحكم فعّال':'وضع تشخيص';
+    el('batteryState').textContent=state.battery_percent>=0
+      ? 'بطارية ≈'+state.battery_percent+'%'+(state.usb_power?' • USB':'')
+      : 'البطارية غير متاحة';
+    el('batteryState').title=state.battery_mv>0
+      ? (state.battery_mv/1000).toFixed(2)+' V • نسبة تقريبية' : '';
    editor=(state.items||[]).map(x=>({name:x.name,datetime:x.datetime}));
    el('sta').textContent=state.ssid||'غير محددة';
    el('zkip').textContent=state.zk_ip;
