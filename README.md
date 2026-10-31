@@ -1,8 +1,8 @@
 # ZKTeco Clock Control — M5StickC Plus
 
-**v1.0.2 — faster 700ms M5 button and unified SETUP shortcuts · ZKTeco write needs field acceptance**
+**v1.0.4 — Sunday 2026-11-01 field-release candidate (M13 source frozen, not yet ZKTeco field-certified)**
 
-> The owner has tested real M5StickC Plus HTTPS, iPhone trust/login and session persistence across power cycle. The hardware's ZKTeco `SET_TIME` command has **not yet been verified** in this conversation. Default firmware is READ ONLY; enable `m5stickc-plus-secure-write-lab` only after a controlled protocol read/write qualification. See [v1 release notes](docs/RELEASE_V1_RC1.md).
+> **Current default `m5stickc-plus-production` is WRITE-ENABLED**, not read-only. A 700 ms B hold or authenticated one-tap iPhone Execute can change the live attendance terminal clock; neither requires an extra large-shift confirmation. The operator has verified battery display, M5 RTC and restart; **GET_TIME/SET_TIME on the actual ZKTeco terminal from this M5 are still pending onsite testing**. Preserve the installed HTTPS CA, credentials, NVS and existing device settings. See [Sunday release and verification plan](docs/RELEASE_V1_0_4_SUNDAY_2026_11_01.md). Older sections below describe historical milestones and are not the current deployment policy.
 
 ## v1.0.2 — Faster M5 / improved SETUP
 
