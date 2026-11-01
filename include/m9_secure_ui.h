@@ -80,7 +80,9 @@ footer{color:#7e93a9;font-size:11px;padding:12px 0}
 <section id="settings" hidden>
 <div class="card">
 <h2>الاتصال والجهاز</h2>
-<div class="row"><span class="muted">شبكة الاتصال</span><b id="sta">—</b></div>
+<div class="row"><span class="muted">الشبكة المتصلة حالياً</span><b id="sta">—</b></div>
+<div class="row"><span class="muted">الشبكة الأساسية</span><b id="primarySta">—</b></div>
+<div class="row"><span class="muted">الشبكة الاحتياطية</span><b id="backupSta">—</b></div>
 <div class="row"><span class="muted">عنوان البصمة</span><b id="zkip" dir="ltr">—</b></div>
 <div class="row"><span class="muted">الجلسة</span><b id="armedSettings">مقفول</b></div>
 <label for="apName">اسم شبكة إعداد M5</label>
@@ -188,7 +190,10 @@ async function refresh(){
     el('batteryState').title=state.battery_mv>0
       ? (state.battery_mv/1000).toFixed(2)+' V • نسبة تقريبية' : '';
    editor=(state.items||[]).map(x=>({name:x.name,datetime:x.datetime}));
-   el('sta').textContent=state.ssid||'غير محددة';
+   el('sta').textContent=state.active_ssid||'غير متصل';
+   el('primarySta').textContent=state.ssid||'غير محددة';
+   el('backupSta').textContent=state.secondary_enabled
+     ? (state.secondary_ssid||'—') : ((state.secondary_ssid||'StuAct')+' (غير مفعّلة)');
    el('zkip').textContent=state.zk_ip;
    el('apName').value=state.ap_name;
    el('idle').value=String(state.idle);

@@ -255,6 +255,26 @@ RunResult executeSelected() {
     return RunResult::FAILED;
   }
   stored.load();
+  // Read-only entry after all saved presets and the RTC synchronization.
+  // A deliberate M5 B hold reads the terminal time; it NEVER writes.
+  if (selectedPreset == stored.count + 1) {
+    commandBusy = true;
+    String clock, error;
+    uint32_t duration = 0;
+    const bool ok = readDeviceClock(clock, error, duration);
+    commandBusy = false;
+    if (ok) {
+      lastClock = clock;
+      statusLine = "READ OK " + clock.substring(0, 10);
+      Serial.printf("[ZK M5 READ] %s (%lu ms)\n",
+                    clock.c_str(), (unsigned long)duration);
+    } else {
+      lastClock = "";
+      statusLine = "READ ERROR: " + error;
+      Serial.println(statusLine);
+    }
+    return ok ? RunResult::COMPLETED : RunResult::FAILED;
+  }
   if (selectedPreset > stored.count) return RunResult::FAILED;
   zkwire::CivilTime target;
   if (selectedPreset == stored.count) {
@@ -660,14 +680,25 @@ void drawScreen() {
   }
   M5.Lcd.drawString("ZKTeco CLOCK",7,3,2);
   M5.Lcd.drawString(batteryScreenLabel(),175,5,1);
-  M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ? "WIFI CONNECTED" : "CONNECTING...",7,23,2);
+  M5.Lcd.drawString(WiFi.status()==WL_CONNECTED ?
+                    ("WIFI: " + WiFi.SSID()) : "CONNECTING...",7,23,2);
   if (WiFi.status()==WL_CONNECTED) {
     M5.Lcd.drawString("https://zkclock.local",7,43,1);
     M5.Lcd.drawString(WiFi.localIP().toString(),143,43,1);
   }
   stored.load();
-  if (selectedPreset > stored.count) selectedPreset = 0;
-  M5.Lcd.drawString(String(selectedPreset + 1) + "/" + String(stored.count+1),7,63,2);
+  if (selectedPreset > stored.count + 1) selectedPreset = 0;
+  M5.Lcd.drawString(String(selectedPreset + 1) + "/" + String(stored.count+2),7,63,2);
+  if (selectedPreset == stored.count + 1) {
+    M5.Lcd.drawString("READ ZK CLOCK",48,63,2);
+    M5.Lcd.setTextColor(0xBDF7,BLACK);
+    M5.Lcd.drawString(lastClock.length()>=19 ?
+                      lastClock.substring(11,19) : "--:--:--",7,80,4);
+    M5.Lcd.setTextColor(WHITE,BLACK);
+    M5.Lcd.drawString("A: NEXT    HOLD B: READ",7,108,1);
+    M5.Lcd.drawString(statusLine,7,122,1);
+    return;
+  }
   if (selectedPreset == stored.count) {
     zkwire::CivilTime currentRtc;
     const bool good = rtcClock.trustworthy(currentRtc);
@@ -842,7 +873,10 @@ void initSecureRoutes() {
       ",\"write_enabled\":"+
       String(ZK_ENABLE_M5_TIME_WRITE ? "true" : "false")+
       ",\"ssid\":\""+zkJsonEscape(net.ssid)+
-      "\",\"zk_ip\":\""+zkJsonEscape(net.zkIp)+
+      "\",\"active_ssid\":\""+zkJsonEscape(WiFi.status()==WL_CONNECTED ? WiFi.SSID() : String(""))+
+      "\",\"secondary_ssid\":\""+zkJsonEscape(net.secondarySsid)+
+      "\",\"secondary_enabled\":"+String(net.secondaryEnabled?"true":"false")+
+      ",\"zk_ip\":\""+zkJsonEscape(net.zkIp)+
       "\",\"ap_name\":\""+zkJsonEscape(net.currentApName())+
       "\",\"idle\":"+String(screenIdle.timeout())+
       ",\"rtc_ready\":"+String(ready?"true":"false")+
@@ -1139,7 +1173,7 @@ void loop() {
     if (!M5.BtnB.isPressed()) buttonBLatched = false;
   } else {
     if (M5.BtnA.wasPressed()) {
-      selectedPreset = (selectedPreset + 1) % (stored.count + 1);
+      selectedPreset = (selectedPreset + 1) % (stored.count + 2);
       drawScreen();
     }
     if (M5.BtnA.pressedFor(3000) && !buttonALatched) {
