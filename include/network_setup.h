@@ -160,7 +160,8 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
       bool secondaryOpen = server.hasArg("open2");
       newSecondarySsid.trim();
       // Blank password preserves the previous secret for an unchanged SSID.
-      if (!newSecondaryPass.length() && newSecondarySsid == secondarySsid) {
+      if (!newSecondaryPass.length() && !secondaryOpen &&
+          newSecondarySsid == secondarySsid) {
         newSecondaryPass = secondaryPassword;
         if (secondaryEnabled && !secondaryPassword.length()) secondaryOpen = true;
       }
@@ -171,7 +172,7 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
       const bool enableSecondary = newSecondarySsid.length() &&
         (secondaryOpen || newSecondaryPass.length());
       if ((secondaryOpen && newSecondaryPass.length()) ||
-          newSecondarySsid == newSsid) {
+          (enableSecondary && newSecondarySsid == newSsid)) {
         server.send(400, "text/plain", "Invalid secondary WiFi settings");
         return;
       }
