@@ -13,7 +13,9 @@ using WebServer = ESPWebServer;
 
 class NetworkSetup {
 public:
-  String ssid, password, zkIp, apSsid, apPassword;
+  String ssid, password, secondarySsid, secondaryPassword, zkIp, apSsid, apPassword;
+  bool secondaryEnabled = false;
+  uint8_t nextNetwork = 0;
   String savedApName;
   bool apOn = false;
   bool ready = false;
@@ -24,6 +26,9 @@ public:
     p.begin("zk-net", false);
     ssid = p.getString("ssid", initialSsid);
     password = p.getString("pass", initialPass);
+    secondarySsid = p.getString("ssid2", "StuAct");
+    secondaryPassword = p.getString("pass2", "");
+    secondaryEnabled = p.getBool("backupOn", false);
     zkIp = p.getString("zkip", initialIp);
     savedApName = p.getString("apname", "");
     apPassword = p.getString("apkey", "");
@@ -39,7 +44,8 @@ public:
     }
     p.end();
     lastAttempt = millis() - 15000;
-    WiFi.setAutoReconnect(true);
+    // Firmware owns failover timing: the SDK must not race an auto-reconnect.
+    WiFi.setAutoReconnect(false);
     ready = true;
   }
 
@@ -91,7 +97,11 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
 }).catch(()=>{document.getElementById('batteryStatus').textContent='تعذرت قراءة البطارية';});
 </script>)BATT";
       page += "<p>الحالة: <b>" + String(editable ? "شبكة الإعداد الآمنة" : "الاتصال بالشبكة") + "</b></p>";
-      page += "<p>الشبكة الحالية: <b>" + safeHtml(ssid) + "</b></p>";
+      page += "<p>الشبكة الأساسية: <b>" + safeHtml(ssid) + "</b></p>";
+      page += "<p>الشبكة الاحتياطية: <b>" + safeHtml(secondarySsid) +
+        (secondaryEnabled ? " (مفعّلة)" : " (غير مفعّلة — تحتاج كلمة المرور أو تحديد مفتوحة)") + "</b></p>";
+      if (WiFi.status()==WL_CONNECTED)
+        page += "<p>المتصلة الآن: <b>" + safeHtml(WiFi.SSID()) + "</b></p>";
       page += "<p>عنوان البصمة: <b dir='ltr'>" + safeHtml(zkIp) + "</b></p>";
       page += "<p>اسم شبكة إعداد M5: <b dir='ltr'>" + safeHtml(
         currentApName()) + "</b></p>";
@@ -106,6 +116,14 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
           "<input name='pass' type='password' maxlength='63' autocomplete='new-password'>"
           "<label><input type='checkbox' name='open' value='1' style='width:auto'>"
           " شبكة مفتوحة بدون كلمة مرور</label>"
+          "<label>الشبكة الثانية (احتياطية)</label>"
+          "<input name='ssid2' maxlength='32' value='" + safeHtml(secondarySsid) + "'>"
+          "<label>كلمة مرور الشبكة الثانية (اتركها فارغة للاحتفاظ بها إذا نفس الاسم)</label>"
+          "<input name='pass2' type='password' maxlength='63' autocomplete='new-password'>"
+          "<label><input type='checkbox' name='open2' value='1' style='width:auto'"
+          + String(secondaryEnabled && !secondaryPassword.length() ? " checked" : "") +
+          "> الشبكة الثانية مفتوحة بدون كلمة مرور</label>"
+          "<p>الأولوية للأولى. إذا تعذر اتصالها تُجرّب الثانية. شبكة StuAct تحتاج إعداد كلمة مرورها هنا إن كانت محمية.</p>"
           "<label>عنوان IP جهاز البصمة</label><input name='zkip' maxlength='15' value='"
           + safeHtml(zkIp) + "' required>"
           "<label>اسم شبكة إعداد M5 (حروف إنكليزية أو أرقام أو - أو _)</label>"
@@ -137,6 +155,26 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
       String newSsid = server.arg("ssid");
       String newPass = server.arg("pass");
       bool useOpenNetwork = server.hasArg("open");
+      String newSecondarySsid = server.arg("ssid2");
+      String newSecondaryPass = server.arg("pass2");
+      bool secondaryOpen = server.hasArg("open2");
+      newSecondarySsid.trim();
+      // Blank password preserves the previous secret for an unchanged SSID.
+      if (!newSecondaryPass.length() && newSecondarySsid == secondarySsid) {
+        newSecondaryPass = secondaryPassword;
+        if (secondaryEnabled && !secondaryPassword.length()) secondaryOpen = true;
+      }
+      if (!newSecondarySsid.length()) {
+        newSecondaryPass = "";
+        secondaryOpen = false;
+      }
+      const bool enableSecondary = newSecondarySsid.length() &&
+        (secondaryOpen || newSecondaryPass.length());
+      if ((secondaryOpen && newSecondaryPass.length()) ||
+          newSecondarySsid == newSsid) {
+        server.send(400, "text/plain", "Invalid secondary WiFi settings");
+        return;
+      }
       if (!newPass.length() && !useOpenNetwork && newSsid == ssid)
         newPass = password;
       if ((!newPass.length() && !useOpenNetwork && newSsid != ssid) ||
@@ -163,6 +201,7 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
       else if (timeoutText=="60") timeoutValue=60;
       else if (timeoutText=="120") timeoutValue=120;
       if (!newSsid.length() || newSsid.length()>32 || newPass.length()>63 ||
+          newSecondarySsid.length()>32 || newSecondaryPass.length()>63 ||
           !checkedIp.fromString(newIp) || !validName ||
           !ScreenIdle::valid(timeoutValue)) {
         server.send(400, "text/plain", "Invalid WiFi / AP name / timeout"); return;
@@ -173,6 +212,9 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
       }
       p.putString("ssid", newSsid);
       p.putString("pass", newPass);
+      p.putString("ssid2", newSecondarySsid);
+      p.putString("pass2", newSecondaryPass);
+      p.putBool("backupOn", enableSecondary);
       p.putString("zkip", newIp);
       p.putString("apname", newName);
       p.end();
@@ -181,12 +223,16 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
       }
       ssid=newSsid;
       password=newPass;
+      secondarySsid=newSecondarySsid;
+      secondaryPassword=newSecondaryPass;
+      secondaryEnabled=enableSecondary;
+      nextNetwork=0;
       zkIp=newIp;
       savedApName=newName;
       // Keep the live AP name intact until the operator exits and reenters
       // SETUP mode; changing it mid-request would disconnect the browser.
       String page=zkPageBegin("تم الحفظ");
-      page += "<p>تم حفظ شبكة الاتصال واسم شبكة الإعداد والتوقيت.</p>"
+      page += "<p>تم حفظ الشبكتين واسم شبكة الإعداد والتوقيت. إذا تعذرت الأولى سيحاول M5 الشبكة الاحتياطية.</p>"
               "<p>اسم شبكة الإعداد الجديد يتفعّل بعد إيقاف SETUP وإعادة الدخول إليه "
               "من أزرار M5. إذا تغيّر الاسم، اختاره مجدداً من Wi-Fi في الآيفون.</p>"
               "<a href='/setup'>رجوع للإعدادات</a>" + zkPageEnd();
@@ -227,18 +273,28 @@ fetch('/api/battery',{cache:'no-store'}).then(r=>r.json()).then(b=>{
 
   void tick() {
     if (!ready || apOn) return;
-    if (WiFi.status() == WL_CONNECTED) return;
-    if (millis() - lastAttempt >= 15000) {
-      lastAttempt = millis();
-      if (ssid.length()) {
-        WiFi.mode(WIFI_STA);
-        if (password.length() == 0) {
-          WiFi.setMinSecurity(WIFI_AUTH_OPEN);
-          WiFi.begin(ssid.c_str());
-        } else {
-          WiFi.begin(ssid.c_str(), password.c_str());
-        }
-      }
+    if (WiFi.status() == WL_CONNECTED) {
+      // Stay on the working network. Never interrupt an active operator session.
+      return;
     }
+    if (millis() - lastAttempt < 12000) return;
+    lastAttempt = millis();
+    const bool hasPrimary = ssid.length() > 0;
+    const bool hasBackup = secondaryEnabled && secondarySsid.length() > 0;
+    if (!hasPrimary && !hasBackup) return;
+
+    // On startup try primary first; on failure alternate with secondary.
+    bool backup = hasBackup && (!hasPrimary || (nextNetwork & 1u));
+    if (hasPrimary && hasBackup) ++nextNetwork;
+    else nextNetwork = 0;
+    const String &targetSsid = backup ? secondarySsid : ssid;
+    const String &targetPass = backup ? secondaryPassword : password;
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false, false);
+    WiFi.setMinSecurity(WIFI_AUTH_OPEN);
+    if (targetPass.length()) WiFi.begin(targetSsid.c_str(), targetPass.c_str());
+    else WiFi.begin(targetSsid.c_str());
+    Serial.println(String("WiFi attempting ") + (backup ? "backup: " : "primary: ") + targetSsid);
+
   }
 };
