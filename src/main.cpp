@@ -876,7 +876,7 @@ void initSecureRoutes() {
       "\",\"active_ssid\":\""+zkJsonEscape(WiFi.status()==WL_CONNECTED ? WiFi.SSID() : String(""))+
       "\",\"secondary_ssid\":\""+zkJsonEscape(net.secondarySsid)+
       "\",\"secondary_enabled\":"+String(net.secondaryEnabled?"true":"false")+
-      "\",\"zk_ip\":\""+zkJsonEscape(net.zkIp)+
+      ",\"zk_ip\":\""+zkJsonEscape(net.zkIp)+
       "\",\"ap_name\":\""+zkJsonEscape(net.currentApName())+
       "\",\"idle\":"+String(screenIdle.timeout())+
       ",\"rtc_ready\":"+String(ready?"true":"false")+
