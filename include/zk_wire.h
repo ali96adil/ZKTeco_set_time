@@ -9,6 +9,7 @@
 namespace zkwire {
 
 static const uint16_t kConnect = 1000;
+static const uint16_t kAuth = 1102;
 static const uint16_t kGetTime = 201;
 static const uint16_t kExit = 1001;
 static const uint16_t kAckOk = 2000;
@@ -69,6 +70,55 @@ inline bool makeReadOnlyFrame(uint16_t command, uint16_t session,
   return true;
 }
 
+
+
+// ZKTeco SDK authentication, compatible with pyzk make_commkey.
+inline void makeCommKey(uint32_t key, uint16_t session,
+                        uint8_t out[4]) {
+  uint32_t reversed = 0;
+  for (int i = 0; i < 32; ++i)
+    reversed = (reversed << 1) | ((key >> i) & 1u);
+
+  uint32_t value = reversed + session;
+  uint8_t b[4];
+  put32(b, value);
+
+  b[0] ^= 'Z';
+  b[1] ^= 'K';
+  b[2] ^= 'S';
+  b[3] ^= 'O';
+
+  uint8_t swapped[4] = {b[2], b[3], b[0], b[1]};
+  constexpr uint8_t ticks = 50;
+
+  out[0] = swapped[0] ^ ticks;
+  out[1] = swapped[1] ^ ticks;
+  out[2] = ticks;
+  out[3] = swapped[3] ^ ticks;
+}
+
+inline bool makeAuthFrame(uint16_t session, uint16_t priorReplyId,
+                          uint32_t key, uint8_t out[20]) {
+  if (!out) return false;
+
+  uint8_t zk[12] = {};
+  put16(zk, kAuth);
+  put16(zk + 4, session);
+  put16(zk + 6, priorReplyId);
+  makeCommKey(key, session, zk + 8);
+  put16(zk + 2, checksum(zk, sizeof(zk)));
+
+  uint32_t nextId = uint32_t(priorReplyId) + 1u;
+  if (nextId >= 65535u) nextId -= 65535u;
+  put16(zk + 6, uint16_t(nextId));
+
+  memset(out, 0, 20);
+  put16(out, kMagic1);
+  put16(out + 2, kMagic2);
+  put32(out + 4, sizeof(zk));
+  memcpy(out + 8, zk, sizeof(zk));
+  return true;
+}
 
 // Separate, explicitly named SET_TIME encoder for physically authorized
 // M5 Button B actions only. This is NEVER routed through HTTP.

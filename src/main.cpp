@@ -159,6 +159,37 @@ bool decodeZkTime(const uint8_t data[4], String &clock) {
   return true;
 }
 
+
+// Authenticate only when the terminal requests SDK authorization.
+// SDK communication key 0 was verified independently with pyzk.
+bool connectZkAuthenticated(WiFiClient &client, Reply &r,
+                            String &error) {
+  if (!sendCommand(client, CMD_CONNECT, 0, 65534)) {
+    error = "Failed to send CONNECT";
+    return false;
+  }
+  if (!receiveReply(client, r, error)) return false;
+
+  if (r.code == CMD_ACK_UNAUTH) {
+    uint8_t frame[20] = {};
+    if (!zkwire::makeAuthFrame(r.session, r.replyId, 0, frame)) {
+      error = "AUTH frame creation failed";
+      return false;
+    }
+    if (client.write(frame, sizeof(frame)) != sizeof(frame)) {
+      error = "AUTH transmission failed";
+      return false;
+    }
+    if (!receiveReply(client, r, error)) return false;
+  }
+
+  if (r.code != CMD_ACK_OK) {
+    error = "ZK authentication rejected: " + String(r.code);
+    return false;
+  }
+  return true;
+}
+
 bool readDeviceClock(String &clock, String &error, uint32_t &durationMs) {
   const uint32_t started = millis();
   if (WiFi.status() != WL_CONNECTED) {
@@ -180,16 +211,7 @@ bool readDeviceClock(String &clock, String &error, uint32_t &durationMs) {
   bool success = false;
   do {
     Reply r;
-    if (!sendCommand(client, CMD_CONNECT, 0, 65534)) {
-      error = "Failed to send CONNECT"; break;
-    }
-    if (!receiveReply(client, r, error)) break;
-    if (r.code == CMD_ACK_UNAUTH) {
-      error = "SDK communication key required"; break;
-    }
-    if (r.code != CMD_ACK_OK) {
-      error = "ZK CONNECT rejected code " + String(r.code); break;
-    }
+    if (!connectZkAuthenticated(client, r, error)) break;
     const uint16_t session = r.session;
     const uint16_t replyId = r.replyId;
 
@@ -301,8 +323,7 @@ RunResult executeSelected() {
     if (!client.connect(ip, ZK_DEVICE_PORT, TIMEOUT_MS)) break;
     Reply reply;
     String receiveError;
-    if (!sendCommand(client, CMD_CONNECT, 0, 65534) ||
-        !receiveReply(client, reply, receiveError) || reply.code != CMD_ACK_OK)
+    if (!connectZkAuthenticated(client, reply, receiveError))
       break;
     const uint16_t session = reply.session;
     uint8_t frame[20] = {};
@@ -844,6 +865,11 @@ void initSecureRoutes() {
     String clock,error;
     uint32_t duration=0;
     if(!readDeviceClock(clock,error,duration)) {
+      Serial.printf(
+        "[ZK READ FAILED] reason=%s duration=%lu ms\n",
+        error.c_str(),
+        (unsigned long)duration
+      );
       secureJson(503,"{\"ok\":false,\"error\":\"جهاز البصمة غير متصل\"}");
       return;
     }
