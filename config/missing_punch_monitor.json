@@ -1,0 +1,8 @@
+{
+  "employee_id": "1723",
+  "lookback_completed_days": 4,
+  "attendance_cutoff": "08:30",
+  "departure_start": "14:45",
+  "notes_section": "missing_punch_review",
+  "automatic_device_time_change": false
+}
