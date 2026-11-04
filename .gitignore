@@ -14,3 +14,7 @@ include/config.h
 # M9 device-specific HTTPS private key embedded in local firmware build only
 include/m5_tls_local.h
 .secrets/m5-*
+
+# Local attendance review exports and employee notes (sensitive)
+/local/
+*.attendance.csv
