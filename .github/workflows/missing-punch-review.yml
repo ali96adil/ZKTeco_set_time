@@ -1,0 +1,27 @@
+name: Missing punch review (offline)
+on:
+  push:
+    branches:
+      - feature/missing-punch-review
+  pull_request:
+    paths:
+      - 'tools/missing_punch*.py'
+      - 'tools/zktime_csv_import.py'
+      - 'tools/test_missing_punch*.py'
+      - '.github/workflows/missing-punch-review.yml'
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Four-day classification
+        run: PYTHONPATH=tools python3 tools/test_missing_punch_review.py
+      - name: Note deletion and rescan
+        run: PYTHONPATH=tools python3 tools/test_missing_punch_notes.py
+      - name: Full offline workflow
+        run: PYTHONPATH=tools python3 tools/test_missing_punch_workflow.py
