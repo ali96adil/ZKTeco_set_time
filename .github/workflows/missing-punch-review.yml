@@ -27,3 +27,9 @@ jobs:
         run: PYTHONPATH=tools python3 tools/test_missing_punch_workflow.py
       - name: ATT_LOG candidate offline simulator
         run: PYTHONPATH=tools python3 tools/test_attlog_write_dry_run.py
+      - name: ZK CLOCK Manager archive tests
+        run: PYTHONPATH=tools python3 tools/test_zkclock_manager.py
+      - name: ZK CLOCK Manager HTTP and archive tests
+        run: PYTHONPATH=tools python3 tools/test_zkclock_manager_v2.py
+      - name: ZK CLOCK Manager employee reports
+        run: PYTHONPATH=tools python3 tools/test_zkclock_manager_v3.py
