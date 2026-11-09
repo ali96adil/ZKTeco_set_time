@@ -18,12 +18,16 @@ for file in "${FILES[@]}"; do
     exit 1
   fi
 done
-for file in "${FILES[@]}"; do
-  if [[ -f "tools/$file" ]]; then
-    cp -p "tools/$file" "local/source_backups/${file}.${STAMP}.bak"
-  fi
-  cp "$SOURCE_DIR/$file" "tools/$file"
-done
+if [[ "$SOURCE_DIR" != "$PWD/tools" ]]; then
+  for file in "${FILES[@]}"; do
+    if [[ -f "tools/$file" ]]; then
+      cp -p "tools/$file" "local/source_backups/${file}.${STAMP}.bak"
+    fi
+    cp "$SOURCE_DIR/$file" "tools/$file"
+  done
+else
+  echo "Code already lives in project tools/: running offline tests without copying."
+fi
 PYTHONPATH=tools python3 tools/test_zkclock_manager.py
 PYTHONPATH=tools python3 tools/test_zkclock_manager_v2.py
 PYTHONPATH=tools python3 tools/test_zkclock_manager_v3.py
