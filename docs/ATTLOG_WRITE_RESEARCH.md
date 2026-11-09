@@ -28,3 +28,13 @@ The script does not import pyzk/sockets, connect to any device, issue an SDK com
 
 ## Next validation gate
 Before any live write on a separate test terminal, verify the exact protocol table/fields for the firmware from authoritative sources, obtain a restorable full device backup, use an explicitly marked non-biometric test record, and verify persistence by disconnecting/reconnecting and reading directly from the test device. Do not run speculative writes against the current unit. Do not change the existing `GOLDEN-BASELINE-01` reference, flash M5, or store attendance records in Git.
+
+## Research update (2026-11-09)
+
+- ZKTeco Standalone SDK Development Manual v2.1 documents `SSR_SetDeviceData` only for terminals whose **new firmware** supports PULL. Its examples describe writing schedules, users and holiday settings; it does not certify `ATT_LOG` insertion for this exact iFace950 firmware. Reference: https://studylib.net/doc/27630215/sdk-manual
+- The independently maintained `taha-rafi/php-zkteco` package claims a `CMD_SET_DATA=3001` ATT_LOG write function for ZMM-series. This is a **third-party implementation claim** and its README/tests do not establish interoperability with iFace950 `ZMM220_TFT`, firmware `Ver 6.60 May 14 2018`. Reference: https://github.com/taha-rafi/php-zkteco
+- A successful simulated ACK is not physical-device evidence. No device write has been performed. No speculative write shall be sent to the 37,812-record live unit by research scripts.
+- Current user-provided capture: user `1733` exists and `2026-11-09 14:46:00` is absent. These observations do **not** authorize treating a synthetic record as a verified biometric event.
+- Read-only Mac archive prototype has been developed separately for testing; do not infer it has been deployed from this note.
+
+**Decision:** maintain read-only development. Validate on separate expendable test hardware or obtain authoritative device-specific write support and a verified restorable backup before any live write trial.
