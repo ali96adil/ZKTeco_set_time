@@ -44,14 +44,15 @@ def run():
         assert findings[1]["missing"] == ["attendance"]
         assert findings[2]["missing"] == ["departure"]
         store = MissingPunchNotes(root / "notes.json")
-        first = store.rescan(findings, now=datetime(2026, 11, 7, tzinfo=timezone.utc))
+        fixed_scan_time = datetime(2026, 11, 7, tzinfo=timezone.utc)
+        first = store.rescan(findings, now=fixed_scan_time)
         assert len(first) == 2
         assert store.delete("1723", "2026-11-04", "attendance")
         assert len(store.load()) == 1
-        assert len(store.rescan(findings)) == 2, "Rescan must recreate deleted finding"
+        assert len(store.rescan(findings, now=fixed_scan_time)) == 2, "Rescan must recreate deleted finding"
         assert store.delete_all("1723") == 2
         assert not store.load()
-        assert len(store.rescan(findings)) == 2
+        assert len(store.rescan(findings, now=fixed_scan_time)) == 2
         assert store.delete_older_than(days=7, now=datetime(2026, 11, 16, tzinfo=timezone.utc)) == 2
         assert not store.load()
         # A fully complete scan now finds the previously missing punch.
