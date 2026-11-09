@@ -25,3 +25,5 @@ jobs:
         run: PYTHONPATH=tools python3 tools/test_missing_punch_notes.py
       - name: Full offline workflow
         run: PYTHONPATH=tools python3 tools/test_missing_punch_workflow.py
+      - name: ATT_LOG candidate offline simulator
+        run: PYTHONPATH=tools python3 tools/test_attlog_write_dry_run.py
